@@ -62,14 +62,6 @@ def check_dependencies():
 
     print("All dependencies checked and installed.")
 
-def install_hsemotion():
-    try:
-        import hsemotion
-        print("HSEmotion đã được cài đặt")
-    except ImportError:
-        print("Đang cài đặt HSEmotion...")
-        os.system("pip install hsemotion")
-        print("Đã cài đặt HSEmotion thành công")
 
 # Setup device and load models
 def load_models():
@@ -567,10 +559,10 @@ def analyze_facial_expression_advanced(detections, img_data, depth_map=None, spo
     """Phân tích biểu cảm khuôn mặt nâng cao với kiểm tra hướng mặt"""
     try:
         print("Starting advanced facial expression analysis...")
+
         import cv2
         import numpy as np
         import os
-        import traceback  # Thêm import traceback ở đây
 
         image = img_data['resized_array']
         img_area = image.shape[0] * image.shape[1]
@@ -593,49 +585,112 @@ def analyze_facial_expression_advanced(detections, img_data, depth_map=None, spo
         main_subject = None
         main_subject_idx = -1
 
-        if 'key_subjects' in img_data and img_data['key_subjects']:
-            for idx, subject in enumerate(img_data['key_subjects']):
-                if subject.get('prominence', 0) > 0.4:
+        # A. Từ phân tích sports_analysis
+        # FIX: Adjust how we access the nested dictionary
+        if sports_analysis and 'sports_analysis' in sports_analysis and 'key_subjects' in sports_analysis['sports_analysis']:
+            for idx, subject in enumerate(sports_analysis['sports_analysis']['key_subjects']):
+                if subject['class'] == 'person':
                     main_subject = subject
                     main_subject_idx = idx
                     print(
-                        f"Main subject identified from key_subjects (idx={idx}, prominence={subject.get('prominence', 0):.3f}, sharpness={subject.get('sharpness', 0):.3f})")
+                        f"Main subject identified from key_subjects (idx={idx}, prominence={subject['prominence']:.3f}, sharpness={subject.get('sharpness', 0):.3f})")
                     break
 
-        # 2. CROP AREA AROUND THE HEAD
-        face_found = False
-        head_area = None
-        face_region = None
+        # B. Nếu không tìm thấy từ key_subjects, tìm từ detections
+        if main_subject is None and isinstance(detections, dict) and 'boxes' in detections:
+            max_center_weight = 0
 
-        # A. Nếu có thông tin về chủ thể chính
-        if main_subject and 'box' in main_subject:
-            x, y, w, h = main_subject['box']
-            # Mở rộng hộp để đảm bảo bao gồm toàn bộ đầu
-            head_y = max(0, y - int(h * 0.2))
-            head_h = int(h * 1.4)  # Mở rộng chiều cao để bao gồm toàn bộ đầu
-            head_x = max(0, x - int(w * 0.1))
-            head_w = min(image.shape[1] - head_x, int(w * 1.2))
+            # Kích thước ảnh
+            height, width = image.shape[:2]
+            center_x, center_y = width // 2, height // 2
 
-            # Cắt vùng đầu
-            head_area = image[head_y:head_y + head_h, head_x:head_x + head_w]
-            face_region = head_area.copy()
+            for i, cls in enumerate(detections['classes']):
+                if cls == 'person':
+                    box = detections['boxes'][i]
+                    x1, y1, x2, y2 = box
 
-            # Debug: lưu vùng đầu để kiểm tra
-            cv2.imwrite(f"{debug_dir}/head_area.jpg", cv2.cvtColor(head_area, cv2.COLOR_RGB2BGR))
-            print(f"Head area cropped from main subject: {head_area.shape}")
+                    # Tính diện tích
+                    area = (x2 - x1) * (y2 - y1)
 
-        # B. Nếu không có thông tin về chủ thể, sử dụng toàn bộ ảnh
-        else:
-            face_region = image.copy()
-            print("No main subject identified, using full image")
+                    # Tính vị trí trung tâm và độ gần với trung tâm ảnh
+                    obj_center_x = (x1 + x2) // 2
+                    obj_center_y = (y1 + y2) // 2
+
+                    # Khoảng cách đến trung tâm (chuẩn hóa)
+                    dist_to_center = np.sqrt(((obj_center_x - center_x) / width) ** 2 +
+                                             ((obj_center_y - center_y) / height) ** 2)
+
+                    # Trọng số kết hợp (diện tích + vị trí trung tâm + độ sâu)
+                    center_weight = area * (1 - min(1.0, dist_to_center))
+
+                    # Thêm độ sâu nếu có
+                    if depth_map is not None:
+                        # Điều chỉnh tọa độ cho depth_map
+                        depth_x1 = max(0, min(int(x1 * depth_map.shape[1] / width), depth_map.shape[1] - 1))
+                        depth_y1 = max(0, min(int(y1 * depth_map.shape[0] / height), depth_map.shape[0] - 1))
+                        depth_x2 = max(0, min(int(x2 * depth_map.shape[1] / width), depth_map.shape[1] - 1))
+                        depth_y2 = max(0, min(int(y2 * depth_map.shape[0] / height), depth_map.shape[0] - 1))
+
+                        # Tính độ sâu trung bình (giá trị nhỏ hơn = gần camera hơn)
+                        depth_region = depth_map[depth_y1:depth_y2, depth_x1:depth_x2]
+                        avg_depth = np.mean(depth_region) if depth_region.size > 0 else 1.0
+
+                        # Đối tượng gần có weight cao hơn
+                        depth_weight = 1 - avg_depth
+                        center_weight *= (1 + depth_weight)
+
+                    # Lưu giá trị cao nhất
+                    if center_weight > max_center_weight:
+                        max_center_weight = center_weight
+                        main_subject = {
+                            'box': box,
+                            'class': cls,
+                            'prominence': center_weight,
+                            'depth': avg_depth if depth_map is not None else None
+                        }
+                        main_subject_idx = i
+
+            if main_subject:
+                print(
+                    f"Main subject identified from detections (idx={main_subject_idx}, prominence={main_subject['prominence']:.3f})")
+
+        # Nếu không tìm thấy đối tượng chính
+        if main_subject is None:
+            print("Could not identify a main subject in the image")
+            expression_results['debug_info']['reason'] = "No main subject detected"
+            return expression_results
+
+        # 2. EXTRACT FACE REGION FROM MAIN SUBJECT
+        x1, y1, x2, y2 = main_subject['box']
+
+        # Lưu ảnh đối tượng chính để debug
+        subject_img = image[max(0, y1):min(y2, image.shape[0]),
+                      max(0, x1):min(x2, image.shape[1])]
+        subject_path = f"{debug_dir}/main_subject.jpg"
+        cv2.imwrite(subject_path, cv2.cvtColor(subject_img, cv2.COLOR_RGB2BGR))
+
+        # Cải thiện khu vực ước tính khuôn mặt cho vận động viên
+        # Người chạy thường có đầu cao hơn so với phần thân
+        # Sử dụng phần trên lớn hơn (33% thay vì 25%)
+        head_height = int((y2 - y1) * 0.33)  # Tăng từ 25% lên 33%
+
+        # Mở rộng vùng tìm kiếm khuôn mặt hơn một chút
+        face_y1 = max(0, y1 - int(head_height * 0.1))  # Mở rộng lên trên thêm chút
+        face_y2 = min(y1 + head_height, image.shape[0])
+        face_x1 = max(0, x1)
+        face_x2 = min(x2, image.shape[1])
+
+        # Trích xuất khu vực khuôn mặt ước tính
+        face_region = image[face_y1:face_y2, face_x1:face_x2]
+        face_path = f"{debug_dir}/face_region_estimate.jpg"
+        cv2.imwrite(face_path, cv2.cvtColor(face_region, cv2.COLOR_RGB2BGR))
 
         # 3. TÌM KHUÔN MẶT CHÍNH XÁC HƠN
         print("Using OpenCV for face detection instead of MTCNN")
         face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
         profile_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_profileface.xml')
 
-        # Define confidence threshold
-        confidence_threshold = 0.7  # Threshold for confident face detection
+        confidence_threshold = 0.3  # Threshold for confident face detection
 
         # A. Tìm trong vùng đầu ước tính
         # Convert to grayscale for OpenCV face detection
@@ -652,257 +707,399 @@ def analyze_facial_expression_advanced(detections, img_data, depth_map=None, spo
         face_found = False
         best_face = None
 
-        # Nếu phát hiện khuôn mặt trong vùng đầu
-        confident_faces = [face for face in faces if face['confidence'] > confidence_threshold]
-        if confident_faces:
-            best_face = max(confident_faces, key=lambda x: x['box'][2] * x['box'][3])  # Chọn khuôn mặt lớn nhất
-            face_found = True
-            x, y, w, h = best_face['box']
+        if face_found and ('keypoints' not in best_face or not best_face['keypoints']):
+            # Tính toán vị trí điểm mốc dựa trên hộp khuôn mặt
+            fx, fy, fw, fh = best_face['box']
 
-            # Thêm keypoints ước tính dựa trên box khuôn mặt
+            # Tỷ lệ khuôn mặt chuẩn
             best_face['keypoints'] = {
-                'left_eye': (x + int(w * 0.3), y + int(h * 0.35)),
-                'right_eye': (x + int(w * 0.7), y + int(h * 0.35)),
-                'nose': (x + int(w * 0.5), y + int(h * 0.5)),
-                'mouth_left': (x + int(w * 0.35), y + int(h * 0.75)),
-                'mouth_right': (x + int(w * 0.65), y + int(h * 0.75))
+                'left_eye': (fx + int(fw * 0.3), fy + int(fh * 0.35)),
+                'right_eye': (fx + int(fw * 0.7), fy + int(fh * 0.35)),
+                'nose': (fx + int(fw * 0.5), fy + int(fh * 0.5)),
+                'mouth_left': (fx + int(fw * 0.35), fy + int(fh * 0.75)),
+                'mouth_right': (fx + int(fw * 0.65), fy + int(fh * 0.75))
             }
+            print("Đã thêm điểm mốc khuôn mặt ước tính")
 
-            # Vẽ khuôn mặt đã phát hiện
-            face_debug = face_region.copy()
-            cv2.rectangle(face_debug, (x, y), (x + w, y + h), (0, 255, 0), 2)
-            for name, (px, py) in best_face['keypoints'].items():
-                cv2.circle(face_debug, (px, py), 2, (0, 0, 255), 2)
-            cv2.imwrite(f"{debug_dir}/face_detected.jpg", cv2.cvtColor(face_debug, cv2.COLOR_RGB2BGR))
-            print(f"Face detected in head area: {w}x{h}")
+        if faces:
+            print(f"Found {len(faces)} faces in estimated head region")
 
-        # B. Nếu không tìm thấy, thử tìm khuôn mặt nghiêng
-        if not face_found:
-            faces_profile = profile_cascade.detectMultiScale(gray_face_region, 1.1, 4)
-            faces = []
-            for (x, y, w, h) in faces_profile:
-                faces.append({
-                    'box': (x, y, w, h),
-                    'confidence': 0.7,  # Default confidence
-                    'keypoints': {}
-                })
-
+            # Lấy khuôn mặt lớn nhất và đáng tin cậy nhất
             confident_faces = [face for face in faces if face['confidence'] > confidence_threshold]
             if confident_faces:
-                best_face = max(confident_faces, key=lambda x: x['box'][2] * x['box'][3])  # Chọn khuôn mặt lớn nhất
+                best_face = max(confident_faces, key=lambda face: face['box'][2] * face['box'][3])
                 face_found = True
-                x, y, w, h = best_face['box']
+                print(f"Found confident face with confidence: {best_face['confidence']:.2f}")
 
-                # Thêm keypoints ước tính dựa trên box khuôn mặt nghiêng
-                best_face['keypoints'] = {
-                    'left_eye': (x + int(w * 0.25), y + int(h * 0.35)),
-                    'right_eye': (x + int(w * 0.65), y + int(h * 0.35)),
-                    'nose': (x + int(w * 0.45), y + int(h * 0.5)),
-                    'mouth_left': (x + int(w * 0.35), y + int(h * 0.75)),
-                    'mouth_right': (x + int(w * 0.65), y + int(h * 0.75))
-                }
+                # Điều chỉnh tọa độ về khung hình gốc
+                fx, fy, fw, fh = best_face['box']
+                fx += face_x1
+                fy += face_y1
 
-                # Vẽ khuôn mặt nghiêng đã phát hiện
-                face_debug = face_region.copy()
-                cv2.rectangle(face_debug, (x, y), (x + w, y + h), (255, 0, 0), 2)
-                for name, (px, py) in best_face['keypoints'].items():
-                    cv2.circle(face_debug, (px, py), 2, (0, 0, 255), 2)
-                cv2.imwrite(f"{debug_dir}/profile_face_detected.jpg", cv2.cvtColor(face_debug, cv2.COLOR_RGB2BGR))
-                print(f"Profile face detected: {w}x{h}")
+                print(f"Face dimensions: {fw}x{fh}")
+            else:
+                print("No confident face found in head region")
 
-        # C. Nếu vẫn không tìm thấy, thử với toàn bộ ảnh
-        if not face_found and face_region is not image:
-            gray_image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-            faces_cv = face_cascade.detectMultiScale(gray_image, 1.1, 4)
+        # B. Nếu không tìm thấy trong vùng đầu, thử với toàn bộ phần trên của cơ thể
+        if not face_found:
+            # Tạo vùng tìm kiếm mới - phần trên cơ thể (50% phần trên)
+            upper_body_y1 = max(0, y1)
+            upper_body_y2 = min(y1 + int((y2 - y1) * 0.5), image.shape[0])
+            upper_body_x1 = max(0, x1)
+            upper_body_x2 = min(x2, image.shape[1])
+
+            upper_body = image[upper_body_y1:upper_body_y2, upper_body_x1:upper_body_x2]
+            upper_body_path = f"{debug_dir}/upper_body.jpg"
+            cv2.imwrite(upper_body_path, cv2.cvtColor(upper_body, cv2.COLOR_RGB2BGR))
+
+            # Tìm khuôn mặt trong phần trên
+            gray_upper_body = cv2.cvtColor(upper_body, cv2.COLOR_RGB2GRAY)
+            faces_cv = face_cascade.detectMultiScale(gray_upper_body, 1.1, 4)
             faces = []
             for (x, y, w, h) in faces_cv:
                 faces.append({
                     'box': (x, y, w, h),
-                    'confidence': 0.75,  # Default confidence
+                    'confidence': 0.8,  # Default confidence
                     'keypoints': {}
                 })
 
-            confident_faces = [face for face in faces if face['confidence'] > confidence_threshold]
-            if confident_faces:
-                best_face = max(confident_faces, key=lambda x: x['box'][2] * x['box'][3])  # Chọn khuôn mặt lớn nhất
-                face_found = True
-                x, y, w, h = best_face['box']
+            if faces:
+                print(f"Found {len(faces)} faces in upper body region")
 
-                # Thêm keypoints ước tính
-                best_face['keypoints'] = {
-                    'left_eye': (x + int(w * 0.3), y + int(h * 0.35)),
-                    'right_eye': (x + int(w * 0.7), y + int(h * 0.35)),
-                    'nose': (x + int(w * 0.5), y + int(h * 0.5)),
-                    'mouth_left': (x + int(w * 0.35), y + int(h * 0.75)),
-                    'mouth_right': (x + int(w * 0.65), y + int(h * 0.75))
-                }
+                # Lấy khuôn mặt lớn nhất và đáng tin cậy nhất
+                confident_faces = [face for face in faces if face['confidence'] > confidence_threshold]
+                if confident_faces:
+                    best_face = max(confident_faces, key=lambda face: face['box'][2] * face['box'][3])
+                    face_found = True
+                    print(f"Found confident face with confidence: {best_face['confidence']:.2f}")
 
-                # Vẽ khuôn mặt đã phát hiện trong ảnh đầy đủ
-                face_debug = image.copy()
-                cv2.rectangle(face_debug, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                for name, (px, py) in best_face['keypoints'].items():
-                    cv2.circle(face_debug, (px, py), 2, (0, 0, 255), 2)
-                cv2.imwrite(f"{debug_dir}/full_image_face.jpg", cv2.cvtColor(face_debug, cv2.COLOR_RGB2BGR))
-                print(f"Face detected in full image: {w}x{h}")
+                    # Điều chỉnh tọa độ về khung hình gốc
+                    fx, fy, fw, fh = best_face['box']
+                    fx += upper_body_x1
+                    fy += upper_body_y1
 
-        # 4. KIỂM TRA KHUÔN MẶT VÀ XÁC MINH TÍNH HỢP LỆ
+                    print(f"Face dimensions: {fw}x{fh}")
+
+        # C. Nếu vẫn không tìm thấy, thử với toàn bộ đối tượng
         if not face_found:
-            print("No valid face detected in the image")
-            expression_results['debug_info']['reason'] = "No valid face detected"
+            gray_subject = cv2.cvtColor(subject_img, cv2.COLOR_RGB2GRAY)
+            faces_cv = face_cascade.detectMultiScale(gray_subject, 1.1, 4)
+            faces = []
+            for (x, y, w, h) in faces_cv:
+                faces.append({
+                    'box': (x, y, w, h),
+                    'confidence': 0.8,  # Default confidence
+                    'keypoints': {}
+                })
+
+            if faces:
+                print(f"Found {len(faces)} faces in full main subject")
+
+                # Lọc ra các khuôn mặt đáng tin cậy
+                confident_faces = [face for face in faces if face['confidence'] > confidence_threshold]
+                if confident_faces:
+                    # Ưu tiên khuôn mặt ở phía trên và lớn
+                    def face_score(face):
+                        fx, fy, fw, fh = face['box']
+                        size_score = fw * fh  # Kích thước lớn tốt hơn
+                        position_score = -fy * 2  # Vị trí cao hơn tốt hơn
+                        return size_score + position_score
+
+                    best_face = max(confident_faces, key=face_score)
+                    face_found = True
+
+                    # Điều chỉnh tọa độ về khung hình gốc
+                    fx, fy, fw, fh = best_face['box']
+                    fx += x1
+                    fy += y1
+
+                    print(f"Face dimensions: {fw}x{fh}")
+                else:
+                    print("No confident face found in subject")
+
+        # D. Nếu vẫn không tìm thấy, thử với profile face detection
+        if not face_found:
+            try:
+                # Thử với OpenCV's Haar Cascade - xử lý tốt hơn với góc nhìn khó
+                # Chuyển sang grayscale
+                gray_subject = cv2.cvtColor(subject_img, cv2.COLOR_RGB2GRAY)
+
+                # Phát hiện khuôn mặt nghiêng
+                faces_cv = profile_cascade.detectMultiScale(gray_subject, 1.1, 4)
+
+                # Nếu phát hiện được
+                if len(faces_cv) > 0:
+                    print(f"Found {len(faces_cv)} faces with OpenCV Profile Cascade")
+
+                    # Lấy khuôn mặt lớn nhất
+                    best_haar_face = max(faces_cv, key=lambda f: f[2] * f[3])
+                    hx, hy, hw, hh = best_haar_face
+
+                    # Chuyển đổi sang định dạng giống MTCNN
+                    best_face = {
+                        'box': (hx, hy, hw, hh),
+                        'confidence': 0.8,  # Giả định confidence
+                        'keypoints': {}
+                    }
+
+                    # Điều chỉnh tọa độ về khung hình gốc
+                    fx, fy, fw, fh = hx, hy, hw, hh
+                    fx += x1
+                    fy += y1
+
+                    face_found = True
+                    print(f"Face found with Haar Cascade: {fw}x{fh}")
+            except Exception as e:
+                print(f"Error using OpenCV Haar Cascade: {str(e)}")
+
+        # Kiểm tra xem có tìm thấy khuôn mặt không
+        if not face_found:
+            print("No face detected after trying multiple methods")
+            expression_results['debug_info']['reason'] = "No face detected in the subject"
             return expression_results
-        else:
-            expression_results['has_faces'] = True
 
-        # A. Cắt và chuẩn bị ảnh khuôn mặt
-        x, y, w, h = best_face['box']
-        face_img = face_region[y:y + h, x:x + w]
+        # 4. KIỂM TRA HƯỚNG KHUÔN MẶT VÀ ĐẶC ĐIỂM KHUÔN MẶT
+        def verify_face_orientation(face_img, keypoints=None):
+            """Kiểm tra xem khuôn mặt có hướng về phía camera không"""
+            # Nếu không có keypoints, thử nhận diện với dlib
+            try:
+                # Chuyển đổi ảnh sang grayscale
+                gray = cv2.cvtColor(face_img, cv2.COLOR_RGB2GRAY)
 
-        # B. Kiểm tra kích thước
-        min_face_size = 30
-        if w < min_face_size or h < min_face_size:
-            print(f"Face too small: {w}x{h} (minimum {min_face_size})")
-            expression_results['debug_info']['reason'] = f"Face too small: {w}x{h}"
+                # Kiểm tra keypoints từ MTCNN
+                if keypoints and all(k in keypoints for k in ['left_eye', 'right_eye', 'nose']):
+                    print("Verified face using MTCNN keypoints")
+                    return True
+
+                # Kiểm tra bằng phân bố gradient và các đặc trưng khuôn mặt
+                sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+                sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+                gradient_mag = np.sqrt(sobelx ** 2 + sobely ** 2)
+
+                # Chia ảnh thành grid 3x3
+                h, w = gray.shape
+                cell_h, cell_w = h // 3, w // 3
+
+                # Kiểm tra đặc trưng khuôn mặt phân bố
+                center_cell = gradient_mag[cell_h:2 * cell_h, cell_w:2 * cell_w]
+                center_mean = np.mean(center_cell)
+
+                # Vùng mắt (thường là phần trên của khuôn mặt)
+                eye_region = gradient_mag[:cell_h, :]
+                eye_mean = np.mean(eye_region)
+
+                # Vùng miệng (thường là phần dưới của khuôn mặt)
+                mouth_region = gradient_mag[2 * cell_h:, :]
+                mouth_mean = np.mean(mouth_region)
+
+                # Khuôn mặt thường có đặc trưng tại mắt và miệng (gradient cao)
+                if eye_mean > 30 and mouth_mean > 20 and center_mean > 15:
+                    print(
+                        f"Face features verified: eye={eye_mean:.1f}, mouth={mouth_mean:.1f}, center={center_mean:.1f}")
+                    return True
+                else:
+                    print(
+                        f"Insufficient face features: eye={eye_mean:.1f}, mouth={mouth_mean:.1f}, center={center_mean:.1f}")
+
+                    # Fallback: Kiểm tra phân phối grayscale
+                    hist = cv2.calcHist([gray], [0], None, [256], [0, 256])
+                    hist_norm = cv2.normalize(hist, hist, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX)
+
+                    # Tính entropy của histogram (khuôn mặt thường có entropy cao)
+                    hist_flat = hist_norm.flatten() + 1e-7  # Tránh log(0)
+                    entropy = -np.sum(hist_flat * np.log2(hist_flat))
+
+                    # Tính độ tương phản (khuôn mặt thường có độ tương phản cao)
+                    contrast = np.std(gray)
+
+                    # Kiểm tra phân phối màu da
+                    # (Trong không gian HSV, màu da con người có hue khoảng 0-50)
+                    hsv = cv2.cvtColor(face_img, cv2.COLOR_RGB2HSV)
+                    h, s, v = cv2.split(hsv)
+
+                    # Tính phần trăm pixel trong vùng màu da
+                    skin_mask = ((h >= 0) & (h <= 50) & (s >= 25) & (s <= 230)) | (h < 20)
+                    skin_percent = np.sum(skin_mask) / (face_img.shape[0] * face_img.shape[1])
+
+                    # In thông tin điểm số
+                    print(
+                        f"Face verification: entropy={entropy:.2f}, contrast={contrast:.2f}, skin%={skin_percent:.2f}")
+
+                    # Xác định dựa trên ngưỡng
+                    has_face_features = (entropy > 6.5 and contrast > 40 and skin_percent > 0.3)
+                    if not has_face_features:
+                        print("Failed face verification with entropy/contrast/skin check")
+                    return has_face_features
+
+            except Exception as e:
+                print(f"Error in face orientation check: {str(e)}")
+                return False
+
+        # Đảm bảo tọa độ nằm trong ảnh
+        fx = max(0, fx)
+        fy = max(0, fy)
+        fx2 = min(image.shape[1], fx + fw)
+        fy2 = min(image.shape[0], fy + fh)
+        fw = fx2 - fx
+        fh = fy2 - fy
+
+        # Trích xuất khuôn mặt đã điều chỉnh
+        face_img = image[fy:fy + fh, fx:fx + fw]
+
+        # Lưu khuôn mặt để debug
+        best_face_path = f"{debug_dir}/best_face.jpg"
+        cv2.imwrite(best_face_path, cv2.cvtColor(face_img, cv2.COLOR_RGB2BGR))
+        print(f"Best face: {best_face_path}")
+
+        # Kiểm tra nội dung khuôn mặt và hướng
+        if not verify_face_orientation(face_img, best_face.get('keypoints', None)):
+            print("Face verification failed - detected area is not a frontal face")
+            expression_results['debug_info']['reason'] = "Detected area is not a frontal face"
             return expression_results
 
-        print(f"Face dimensions: {w}x{h}")
-        cv2.imwrite(f"{debug_dir}/best_face.jpg", cv2.cvtColor(face_img, cv2.COLOR_RGB2BGR))
+        # Kiểm tra keypoints nếu có
+        if best_face:
+            # Luôn sử dụng điểm mốc ước tính nếu không có sẵn
+            if 'keypoints' not in best_face or not best_face['keypoints']:
+                fx, fy, fw, fh = best_face['box']
 
-        # C. Xác minh các điểm đặc trưng khuôn mặt
-        facial_features_confidence = {}
+                best_face['keypoints'] = {
+                    'left_eye': (fx + int(fw * 0.3), fy + int(fh * 0.35)),
+                    'right_eye': (fx + int(fw * 0.7), fy + int(fh * 0.35)),
+                    'nose': (fx + int(fw * 0.5), fy + int(fh * 0.5)),
+                    'mouth_left': (fx + int(fw * 0.35), fy + int(fh * 0.75)),
+                    'mouth_right': (fx + int(fw * 0.65), fy + int(fh * 0.75))
+                }
+                print("Đã thêm điểm mốc khuôn mặt ước tính")
 
-        # Kiểm tra vị trí mắt
-        if best_face and 'keypoints' in best_face:
-            left_eye = best_face['keypoints'].get('left_eye')
-            right_eye = best_face['keypoints'].get('right_eye')
-            if left_eye and right_eye:
-                eye_level_diff = abs(left_eye[1] - right_eye[1]) / h * 100
-                facial_features_confidence['eye'] = max(0, 100 - eye_level_diff * 5)
+            print("Sử dụng điểm mốc khuôn mặt cho phân tích biểu cảm")
 
-            # Kiểm tra vị trí miệng
-            mouth_left = best_face['keypoints'].get('mouth_left')
-            mouth_right = best_face['keypoints'].get('mouth_right')
-            if mouth_left and mouth_right and left_eye and right_eye:
-                mouth_symmetry = abs(mouth_left[1] - mouth_right[1]) / h * 100
-                facial_features_confidence['mouth'] = max(0, 100 - mouth_symmetry * 5)
-
-                # Kiểm tra vị trí giữa khuôn mặt
-                nose = best_face['keypoints'].get('nose')
-                if nose:
-                    face_center_x = x + w // 2
-                    center_offset = abs(nose[0] - face_center_x) / w * 100
-                    facial_features_confidence['center'] = max(0, 100 - center_offset * 3)
-
-        # In ra điểm tin cậy cho các đặc điểm khuôn mặt
-        feature_confidence_str = ", ".join([f"{k}={v:.1f}" for k, v in facial_features_confidence.items()])
-        print(f"Face features verified: {feature_confidence_str}")
-
-        # Xác minh điểm mốc
-        if best_face and 'keypoints' in best_face:
-            # Lấy keypoints
-            keypoints = best_face['keypoints']
-
-            # MTCNN trả về 5 điểm: left_eye, right_eye, nose, mouth_left, mouth_right
-            required_points = ['left_eye', 'right_eye', 'nose', 'mouth_left', 'mouth_right']
-            found_points = [point for point in required_points if point in keypoints]
-
-            # Yêu cầu ít nhất 3 điểm mốc để phân tích biểu cảm
-            if len(found_points) < 3:
-                print(f"Not enough facial keypoints detected: {len(found_points)}/5")
-                expression_results['debug_info']['reason'] = f"Not enough facial keypoints: {len(found_points)}/5"
-                return expression_results
-            else:
-                print(f"Found {len(found_points)}/5 facial keypoints")
-
-        # 5. PHÂN TÍCH BIỂU CẢM SỬ DỤNG HSEMOTION
+        # 5. PHÂN TÍCH BIỂU CẢM SỬ DỤNG DEEPFACE
         try:
-            # Import HSEmotion
-            import hsemotion
+            # Kiểm tra và cài đặt DeepFace nếu cần
+            try:
+                from deepface import DeepFace
+            except ImportError:
+                print("Installing DeepFace library...")
+                os.system("pip install deepface")
+                from deepface import DeepFace
 
-            print("Starting emotion analysis with HSEmotion...")
+            print("Starting emotion analysis with DeepFace...")
 
-            # Khởi tạo model HSEmotion - API chuẩn xác
-            emotion_classifier = hsemotion.HSEmotionRecognizer(model_name="enet_b0_8_best_vgaf")
+            # Lưu ảnh khuôn mặt tạm thời để DeepFace xử lý
+            temp_face_path = f"{debug_dir}/temp_face.jpg"
+            cv2.imwrite(temp_face_path, cv2.cvtColor(face_img, cv2.COLOR_RGB2BGR))
 
-            # Phân tích cảm xúc
-            face_img_rgb = cv2.cvtColor(face_img, cv2.COLOR_BGR2RGB) if len(face_img.shape) == 3 and face_img.shape[
-                2] == 3 else face_img
+            # Phân tích cảm xúc với DeepFace với các tùy chọn mở rộng cho ảnh thể thao
+            try:
+                analysis = DeepFace.analyze(temp_face_path,
+                                            actions=['emotion'],
+                                            enforce_detection=False,
+                                            detector_backend='opencv')
+            except:
+                print("Retrying with different backend...")
+                analysis = DeepFace.analyze(temp_face_path,
+                                            actions=['emotion'],
+                                            enforce_detection=False,
+                                            detector_backend='ssd')
 
-            # Resize nếu cần thiết (một số model yêu cầu)
-            if min(face_img_rgb.shape[:2]) < 64:
-                face_img_rgb = cv2.resize(face_img_rgb, (224, 224))
+            # Xử lý kết quả
+            if isinstance(analysis, list):
+                emotion_data = analysis[0]
+            else:
+                emotion_data = analysis
 
-            # Chạy dự đoán
-            emotion_idx, emotion_probs = emotion_classifier.predict_emotions(face_img_rgb, logits=False)
+            dominant_emotion = emotion_data['dominant_emotion']
+            emotion_scores = emotion_data['emotion']
 
-            # HSEmotion trả về danh sách cảm xúc theo thứ tự
-            emotions = ['Anger', 'Contempt', 'Disgust', 'Fear', 'Happiness', 'Neutral', 'Sadness', 'Surprise']
-
-            # Map emotions sang định dạng cũ
-            emotion_map = {
-                'Anger': 'angry',
-                'Contempt': 'contempt',
-                'Disgust': 'disgust',
-                'Fear': 'fear',
-                'Happiness': 'happy',
-                'Neutral': 'neutral',
-                'Sadness': 'sad',
-                'Surprise': 'surprise'
-            }
-
-            # Lấy tên cảm xúc
-            dominant_emotion = emotion_map[emotions[emotion_idx]]
-
-            # Chuyển thành từ điển
-            emotion_scores = {emotion_map[emotions[i]]: float(score) for i, score in enumerate(emotion_probs)}
-
-            print(f"HSEmotion detected emotion: {dominant_emotion}")
+            print(f"DeepFace detected emotion: {dominant_emotion}")
             print(f"Emotion scores: {emotion_scores}")
 
             # Tính cường độ cảm xúc từ điểm số
             dominant_score = emotion_scores[dominant_emotion]
             other_emotions = [v for k, v in emotion_scores.items() if k != dominant_emotion]
             avg_other = sum(other_emotions) / len(other_emotions) if other_emotions else 0
-            emotion_intensity = min(0.95, max(0.2, dominant_score - avg_other + 0.5))
+            emotion_intensity = min(0.95, max(0.2, dominant_score / 100))
 
         except Exception as e:
-            print(f"HSEmotion analysis failed: {str(e)}")
-            print(f"Chi tiết: {traceback.format_exc()}")
+            print(f"DeepFace analysis failed: {str(e)}")
             print("Falling back to basic emotion analysis...")
 
-            # Phân tích đơn giản dựa trên điểm mốc khuôn mặt
+            # Fallback to basic analysis if DeepFace fails
+            gray = cv2.cvtColor(face_img, cv2.COLOR_RGB2GRAY)
+            brightness = np.mean(gray) / 255.0
+            contrast = np.std(gray) / 128.0
+
+            # Calculate image histogram (simplified)
+            hist = cv2.calcHist([gray], [0], None, [8], [0, 256])
+            hist = cv2.normalize(hist, hist).flatten()
+
+            # Calculate image gradient (texture)
+            sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+            sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+            gradient_mean = np.mean(np.sqrt(sobelx ** 2 + sobely ** 2)) / 128.0
+
+            # Divide image into regions
+            h, w = gray.shape
+            top = gray[:h // 3, :]  # Forehead/eyes area
+            middle = gray[h // 3:2 * h // 3, :]  # Nose area
+            bottom = gray[2 * h // 3:, :]  # Mouth/chin area
+
+            # Calculate features by region
+            top_contrast = np.std(top) / 128.0
+            middle_contrast = np.std(middle) / 128.0
+            bottom_contrast = np.std(bottom) / 128.0
+
+            # Initialize emotions
             emotion_scores = {
-                'happy': 0.2,
-                'surprise': 0.2,
-                'neutral': 0.4,
-                'angry': 0.1,
-                'sad': 0.1,
+                'neutral': 0.10,
+                'happy': 0.10,
+                'surprise': 0.10,
+                'sad': 0.10,
+                'angry': 0.10,
+                'fear': 0.10,
+                'disgust': 0.10
             }
 
-            # Tính toán biểu cảm đơn giản dựa trên các điểm mốc khuôn mặt nếu có
-            if best_face and 'keypoints' in best_face:
-                # Tính khoảng cách giữa các điểm mốc
-                kp = best_face['keypoints']
+            # Analyze brightness & contrast
+            if brightness > 0.6:  # Bright -> happy/positive
+                emotion_scores['happy'] += 0.15
+                emotion_scores['neutral'] -= 0.05
+            elif brightness < 0.4:  # Dark -> serious/negative
+                emotion_scores['sad'] += 0.10
+                emotion_scores['angry'] += 0.05
+                emotion_scores['happy'] -= 0.05
 
-                # Khoảng cách miệng
-                if 'mouth_left' in kp and 'mouth_right' in kp:
-                    mouth_width = ((kp['mouth_right'][0] - kp['mouth_left'][0]) ** 2 +
-                                   (kp['mouth_right'][1] - kp['mouth_left'][1]) ** 2) ** 0.5
+            # Analyze texture
+            if gradient_mean > 0.25:  # High texture -> strong expression
+                emotion_scores['surprise'] += 0.15
+                emotion_scores['happy'] += 0.05
+                emotion_scores['neutral'] -= 0.10
 
-                    # Khoảng cách mắt
-                    eye_width = ((kp['right_eye'][0] - kp['left_eye'][0]) ** 2 +
-                                 (kp['right_eye'][1] - kp['left_eye'][1]) ** 2) ** 0.5
+            # Mouth area analysis
+            if bottom_contrast > 0.20:
+                if brightness > 0.45:
+                    emotion_scores['happy'] += 0.25
+                else:
+                    emotion_scores['surprise'] += 0.20
 
-                    # Tỷ lệ miệng/mắt cao = ngạc nhiên hoặc vui vẻ
-                    if mouth_width / eye_width > 1.2:
-                        emotion_scores['surprise'] += 0.3
-                        emotion_scores['happy'] += 0.2
-                    else:
-                        emotion_scores['neutral'] += 0.2
+            # Ensure no negative values
+            emotion_scores = {k: max(0.01, v) for k, v in emotion_scores.items()}
 
-            # Tìm cảm xúc chính
-            dominant_emotion = max(emotion_scores.items(), key=lambda x: x[1])[0]
+            # Normalize
+            total = sum(emotion_scores.values())
+            emotion_scores = {k: v / total for k, v in emotion_scores.items()}
+
+            # Get dominant emotion
+            dominant_emotion = max(emotion_scores, key=emotion_scores.get)
             dominant_score = emotion_scores[dominant_emotion]
-            emotion_intensity = min(0.95, max(0.2, dominant_score + 0.3))
+
+            # Calculate intensity
+            other_scores = [v for k, v in emotion_scores.items() if k != dominant_emotion]
+            avg_other = sum(other_scores) / len(other_scores) if other_scores else 0
+            emotion_intensity = max(0.2, min(0.95, 0.5 + (dominant_score - avg_other)))
+
+            print(f"Basic detected emotion: {dominant_emotion}")
 
         # 6. PHÂN TÍCH NGỮ CẢNH THỂ THAO
         # Xác định loại thể thao
@@ -913,8 +1110,8 @@ def analyze_facial_expression_advanced(detections, img_data, depth_map=None, spo
 
         # Mức độ hành động
         action_level = 0
-        if "action_analysis" in sports_analysis and "action_level" in sports_analysis["action_analysis"]:
-            action_level = sports_analysis["action_analysis"]["action_level"]
+        if "action_analysis" in locals() and "action_level" in locals()["action_analysis"]:
+            action_level = locals()["action_analysis"]["action_level"]
 
         # Điều chỉnh biểu cảm dựa trên ngữ cảnh thể thao
         contextual_emotions = emotion_scores.copy()
@@ -925,7 +1122,7 @@ def analyze_facial_expression_advanced(detections, img_data, depth_map=None, spo
         track_sports = ['Running', 'Track', 'Sprint', 'Athletics']
 
         # Phát hiện thể thao điền kinh từ ảnh
-        if any(name in str(sport_type).lower() for name in ['track', 'run', 'sprint', 'athlet']):
+        if any(name in str(subject_path).lower() for name in ['track', 'run', 'sprint', 'athlet']):
             print("Detected track and field sport from image")
             sport_type = 'Track and Field'
 
@@ -944,113 +1141,68 @@ def analyze_facial_expression_advanced(detections, img_data, depth_map=None, spo
                 contextual_emotions['happy'] = contextual_emotions.get('happy', 0) * 1.2
                 contextual_emotions['surprise'] = contextual_emotions.get('surprise', 0) * 1.2
 
-        # Điều chỉnh cho môn điền kinh với cảm xúc phù hợp hơn
+        # Điều chỉnh cho môn điền kinh
         elif sport_type in track_sports or 'Track and Field' in sport_type:
             print(f"Adjusting emotions for track sport")
-            # Giảm happy và tăng determination/effort
-            contextual_emotions['happy'] = contextual_emotions.get('happy', 0) * 0.9  # Giảm happy
+            # Vận động viên điền kinh thường thể hiện quyết tâm/nỗ lực
+            contextual_emotions['angry'] = contextual_emotions.get('angry', 0) * 1.2  # quyết tâm
+            contextual_emotions['happy'] = contextual_emotions.get('happy', 0) * 1.1  # phấn khích
+            emotion_intensity = min(0.95, emotion_intensity * 1.3)  # cường độ cao
 
-            # Nếu phát hiện angry hoặc neutral cao, đổi thành determination
-            if contextual_emotions.get('angry', 0) > 0.2 or contextual_emotions.get('neutral', 0) > 0.3:
-                # Tạo cảm xúc determination từ angry
-                determination_score = contextual_emotions.get('angry', 0) * 1.8
-                contextual_emotions['determination'] = determination_score
+        # Điều chỉnh theo mức độ hành động
+        if action_level > 0.7:
+            print(f"Adjusting emotions for high action level: {action_level:.2f}")
+            # Hành động mạnh mẽ -> biểu cảm mạnh
+            emotion_intensity = min(0.95, emotion_intensity * 1.3)
 
-                # Nếu determination là cảm xúc chính
-                if determination_score > max([v for k, v in contextual_emotions.items() if k != 'determination']):
-                    dominant_emotion = 'determination'
-                    print("Changed main emotion to 'determination' based on track sports context")
+        # Chuẩn hóa lại cảm xúc sau khi điều chỉnh
+        total = sum(v for k, v in contextual_emotions.items())
+        if total > 0:
+            contextual_emotions = {k: v / total for k, v in contextual_emotions.items()}
 
-        # 7. PHÂN TÍCH MỨC ĐỘ CẢM XÚC
-        emotional_value = 'Moderate'
-        if emotion_intensity < 0.4:
-            emotional_value = 'Low'
-        elif emotion_intensity > 0.7:
+        # Xác định cảm xúc chính sau điều chỉnh
+        adjusted_emotion = max(contextual_emotions, key=contextual_emotions.get)
+
+        print(f"Context-adjusted emotion: {adjusted_emotion} (from {dominant_emotion})")
+        print(f"Adjusted intensity: {emotion_intensity:.2f}")
+
+        # Đánh giá giá trị tình cảm
+        if emotion_intensity > 0.7:
+            emotional_value = 'Very High'
+        elif emotion_intensity > 0.5:
             emotional_value = 'High'
+        elif emotion_intensity > 0.3:
+            emotional_value = 'Medium'
+        else:
+            emotional_value = 'Low'
 
-        # Thêm kết quả vào expression_results
-        expression_results['dominant_emotion'] = dominant_emotion
-        expression_results['emotion_intensity'] = float(emotion_intensity)
-        expression_results['emotional_value'] = emotional_value
-        expression_results['expressions'] = [{'emotion': k, 'score': float(v)} for k, v in contextual_emotions.items()]
-        expression_results['debug_info']['detected'] = True
+        # Xây dựng kết quả cuối cùng
+        expression_results = {
+            'has_faces': True,
+            'dominant_emotion': adjusted_emotion,
+            'original_emotion': dominant_emotion,
+            'emotion_scores': emotion_scores,
+            'contextual_scores': contextual_emotions,
+            'emotion_intensity': emotion_intensity,
+            'emotional_value': emotional_value,
+            'sport_context': sport_type,
+            'action_level': action_level,
+            'face_coordinates': (fx, fy, fw, fh),
+            'face_path': best_face_path,
+            'expressions': [{
+                'box': (fx, fy, fx + fw, fy + fh),
+                'emotion': adjusted_emotion,
+                'scores': contextual_emotions
+            }]
+        }
 
-        # 8. HIỂN THỊ KẾT QUẢ
-        def visualize_emotion_results(face, emotion_name, intensity, emotions_dict):
-            """Hiển thị kết quả phân tích cảm xúc"""
-            # Khởi tạo hình ảnh hiển thị
-            result_img = face.copy()
-
-            # Vẽ nhãn cảm xúc
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            cv2.putText(result_img, f"{emotion_name} ({intensity:.2f})", (10, 25), font, 0.7, (0, 255, 0), 2)
-
-            # Định nghĩa màu dựa trên loại cảm xúc (dạng RGB cho matplotlib)
-            emotion_colors = {
-                'happy': (0.0, 0.8, 0.2),  # Green
-                'happiness': (0.0, 0.8, 0.2),  # Green
-                'surprise': (1.0, 0.7, 0.0),  # Orange
-                'sad': (0.0, 0.0, 0.8),  # Blue
-                'sadness': (0.0, 0.0, 0.8),  # Blue
-                'angry': (0.8, 0.0, 0.0),  # Red
-                'anger': (0.8, 0.0, 0.0),  # Red
-                'fear': (0.8, 0.0, 0.8),  # Purple
-                'disgust': (0.5, 0.4, 0.0),  # Brown
-                'neutral': (0.5, 0.5, 0.5),  # Gray
-                'contempt': (0.6, 0.0, 0.6),  # Dark purple
-                'determination': (0.9, 0.3, 0.0),  # Deep Orange - màu mới cho quyết tâm
-                'effort': (0.7, 0.2, 0.4),  # Cranberry - màu mới cho nỗ lực
-                'unknown': (0.7, 0.7, 0.7)  # Light Gray
-            }
-
-            # Vẽ thanh cảm xúc
-            y_offset = 40
-            bar_height = 15
-            max_width = result_img.shape[1] - 20
-
-            for emotion, score in sorted(emotions_dict.items(), key=lambda x: x[1], reverse=True)[:5]:
-                # Tính toán màu
-                color = emotion_colors.get(emotion, (0.5, 0.5, 0.5))  # Default: gray
-                color_bgr = (int(color[2] * 255), int(color[1] * 255), int(color[0] * 255))
-
-                # Vẽ thanh
-                bar_width = int(score * max_width)
-                cv2.rectangle(result_img, (10, y_offset), (10 + bar_width, y_offset + bar_height), color_bgr, -1)
-
-                # Vẽ nhãn
-                cv2.putText(result_img, f"{emotion}: {score:.2f}",
-                            (10, y_offset - 5), font, 0.5, color_bgr, 1)
-
-                # Cập nhật offset cho thanh tiếp theo
-                y_offset += bar_height + 15
-
-            # Lưu kết quả
-            result_path = f"{debug_dir}/emotion_result.jpg"
-            cv2.imwrite(result_path, cv2.cvtColor(result_img, cv2.COLOR_RGB2BGR))
-            print(f"Emotion visualization saved to {result_path}")
-
-        # Tạo hình ảnh hiển thị kết quả cảm xúc
-        visualize_emotion_results(face_img, dominant_emotion, emotion_intensity, contextual_emotions)
-
-        # Lưu các biểu cảm vào debug_info
-        expression_results['debug_info']['face_dimensions'] = f"{w}x{h}"
-        expression_results['debug_info']['emotion_scores'] = {k: float(v) for k, v in emotion_scores.items()}
-
-        print(f"Advanced facial expression analysis successful: {face_found}")
         return expression_results
 
     except Exception as e:
-        print(f"Error in facial expression analysis: {str(e)}")
+        print(f"Error in advanced facial expression analysis: {str(e)}")
         import traceback
-        print(traceback.format_exc())
-        return {
-            'has_faces': False,
-            'expressions': [],
-            'dominant_emotion': "unknown",
-            'emotion_intensity': 0,
-            'emotional_value': 'Low',
-            'debug_info': {'detected': False, 'reason': f'Error: {str(e)}'}
-        }
+        traceback.print_exc()
+        return {'has_faces': False, 'error': str(e), 'debug_info': {'reason': f"Error: {str(e)}"}}
 
 
 def visualize_emotion_results(face_img, emotion_analysis):
@@ -1119,8 +1271,6 @@ def visualize_emotion_results(face_img, emotion_analysis):
         'disgust': (0.5, 0.4, 0.0),  # Brown
         'neutral': (0.5, 0.5, 0.5),  # Gray
         'contempt': (0.6, 0.0, 0.6),  # Dark purple
-        'determination': (0.9, 0.3, 0.0),  # Deep Orange - màu mới cho quyết tâm
-        'effort': (0.7, 0.2, 0.4),  # Cranberry - màu mới cho nỗ lực
         'unknown': (0.7, 0.7, 0.7)  # Light Gray
     }
 
