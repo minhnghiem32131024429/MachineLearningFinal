@@ -7,67 +7,15 @@ import argparse
 import sys
 import matplotlib.patches as patches
 from matplotlib.colors import LinearSegmentedColormap
-import torch
-import torchvision
-import torchvision.transforms as transforms
-from PIL import Image
-import requests
-from io import BytesIO
 import os
-import sys
-import site
-# Thêm thư mục site-packages vào path để tìm các module đã cài đặt
-sys.path.append(site.getsitepackages()[0])
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+# Thiết lập các biến môi trường trước khi import các module khác
 os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
-import sys
-import os
-import subprocess
-print(f"Python executable: {sys.executable}")
-print(f"Python version: {sys.version}")
-print(f"Python path: {sys.path}")
 
-# Kiểm tra HSEmotion đã cài đặt chưa
-result = subprocess.run([sys.executable, "-m", "pip", "list"],
-                        capture_output=True, text=True)
-print("Installed packages:")
-print(result.stdout)
-# Thêm thủ công đường dẫn đến thư viện HSEmotion
-# (điều chỉnh đường dẫn phù hợp với máy của bạn)
-hsemotion_path = os.path.join(os.path.expanduser("~"), "site-packages")
-if hsemotion_path not in sys.path:
-    sys.path.append(hsemotion_path)
-
-# Kiểm tra thêm các vị trí phổ biến khác
-potential_paths = [
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"),
-    os.path.join(os.path.dirname(sys.executable), "Lib", "site-packages")
-]
-
-for path in potential_paths:
-    if os.path.exists(path) and path not in sys.path:
-        sys.path.append(path)
 # Sửa lỗi matplotlib warning khi chạy trong thread khác
 import matplotlib
 matplotlib.use('Agg')  # Sử dụng Agg backend thay vì interactive backend
 
-# Thêm phần kiểm tra và cài đặt HSEmotion
-def check_hsemotion():
-    try:
-        from hsemotion.facial_emotions import HSEmotionRecognizer
-        print("HSEmotion đã được cài đặt")
-        return True
-    except ImportError:
-        print("Đang cài đặt HSEmotion...")
-        import os
-        os.system("pip install git+https://github.com/HSE-asavchenko/face-emotion-recognition.git")
-        try:
-            from hsemotion.facial_emotions import HSEmotionRecognizer
-            print("HSEmotion đã được cài đặt thành công")
-            return True
-        except ImportError:
-            print("Không thể cài đặt HSEmotion, sẽ sử dụng phương pháp dự phòng")
-            return False
+# Tiếp tục với các import khác...
 
 # Function to install required packages if not already installed
 def check_dependencies():
@@ -81,11 +29,8 @@ def check_dependencies():
         'numpy': 'numpy',
         'matplotlib': 'matplotlib',
         'scipy': 'scipy',
-        'PIL': 'pillow',
-        'hsemotion': 'git+https://github.com/HSE-asavchenko/face-emotion-recognition.git'
+        'PIL': 'pillow'
     }
-
-    # Phần còn lại của hàm giữ nguyên
 
     missing_packages = []
 
@@ -395,25 +340,8 @@ def analyze_sports_scene(detections, depth_map, img_data):
         # Đối tượng gần hơn có điểm cao hơn (20%)
         depth_score = 1 - obj_depth
 
-        # CẢI TIẾN QUAN TRỌNG: Tăng ưu tiên cho đối tượng lớn hơn
-        # Ưu tiên mạnh cho đối tượng lớn (thêm 20%)
-        size_bonus = min(0.2, area_ratio * 2)
-
-        # MỚI: Tổng hợp điểm số với trọng số mới
-        subject_info['prominence'] = position_size_score * 0.6 + sharpness_score * 0.2 + depth_score * 0.2 + size_bonus
-
-        # MỚI: Heuristic đặc biệt cho con người - ưu tiên toàn thân người
-        if subject_info['class'] == 'person':
-            # Kiểm tra nếu đây là toàn thân người (aspect ratio hợp lý)
-            fw, fh = (x2 - x1), (y2 - y1)
-            aspect_ratio = fh / fw if fw > 0 else 0
-
-            # Ưu tiên đối tượng có tỷ lệ toàn thân (1.5-3.0)
-            if 1.5 <= aspect_ratio <= 3.0:
-                subject_info['prominence'] *= 1.5  # Tăng 50% prominence
-            # Phạt các đối tượng quá dài hoặc quá ngắn
-            elif aspect_ratio > 5 or aspect_ratio < 0.5:
-                subject_info['prominence'] *= 0.7  # Giảm 30% prominence
+        # MỚI: Tổng hợp điểm số với trọng số
+        subject_info['prominence'] = position_size_score * 0.4 + sharpness_score * 0.4 + depth_score * 0.2
 
         key_subjects.append(subject_info)
 
@@ -628,16 +556,13 @@ def analyze_sports_composition(detections, analysis, img_data):
 # Hàm phân tích biểu cảm nâng cao kết hợp DeepFace và phân tích ngữ cảnh
 
 def analyze_facial_expression_advanced(detections, img_data, depth_map=None, sports_analysis=None):
-    """Phân tích biểu cảm khuôn mặt nâng cao với OpenCV và HSEmotion"""
+    """Phân tích biểu cảm khuôn mặt nâng cao với kiểm tra hướng mặt"""
     try:
         print("Starting advanced facial expression analysis...")
+
         import cv2
         import numpy as np
         import os
-
-        # Thiết lập để giảm lỗi TF/protobuf
-        os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
-        os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 
         image = img_data['resized_array']
         img_area = image.shape[0] * image.shape[1]
@@ -672,9 +597,7 @@ def analyze_facial_expression_advanced(detections, img_data, depth_map=None, spo
 
         # B. Nếu không tìm thấy từ key_subjects, tìm từ detections
         if main_subject is None and isinstance(detections, dict) and 'boxes' in detections:
-            main_subject_candidates = []
-            largest_person_area = 0
-            largest_person_idx = -1
+            max_center_weight = 0
 
             # Kích thước ảnh
             height, width = image.shape[:2]
@@ -685,9 +608,8 @@ def analyze_facial_expression_advanced(detections, img_data, depth_map=None, spo
                     box = detections['boxes'][i]
                     x1, y1, x2, y2 = box
 
-                    # Tính diện tích và tỷ lệ
+                    # Tính diện tích
                     area = (x2 - x1) * (y2 - y1)
-                    aspect_ratio = (y2 - y1) / (x2 - x1) if (x2 - x1) > 0 else 0
 
                     # Tính vị trí trung tâm và độ gần với trung tâm ảnh
                     obj_center_x = (x1 + x2) // 2
@@ -697,49 +619,39 @@ def analyze_facial_expression_advanced(detections, img_data, depth_map=None, spo
                     dist_to_center = np.sqrt(((obj_center_x - center_x) / width) ** 2 +
                                              ((obj_center_y - center_y) / height) ** 2)
 
-                    # Thêm vào danh sách ứng viên
-                    is_valid_person = 1.5 <= aspect_ratio <= 3.5  # Tỷ lệ hợp lý cho con người
+                    # Trọng số kết hợp (diện tích + vị trí trung tâm + độ sâu)
+                    center_weight = area * (1 - min(1.0, dist_to_center))
 
-                    main_subject_candidates.append({
-                        'idx': i,
-                        'area': area,
-                        'aspect_ratio': aspect_ratio,
-                        'is_valid_person': is_valid_person,
-                        'dist_to_center': dist_to_center,
-                        'box': box
-                    })
+                    # Thêm độ sâu nếu có
+                    if depth_map is not None:
+                        # Điều chỉnh tọa độ cho depth_map
+                        depth_x1 = max(0, min(int(x1 * depth_map.shape[1] / width), depth_map.shape[1] - 1))
+                        depth_y1 = max(0, min(int(y1 * depth_map.shape[0] / height), depth_map.shape[0] - 1))
+                        depth_x2 = max(0, min(int(x2 * depth_map.shape[1] / width), depth_map.shape[1] - 1))
+                        depth_y2 = max(0, min(int(y2 * depth_map.shape[0] / height), depth_map.shape[0] - 1))
 
-                    # Theo dõi người lớn nhất
-                    if area > largest_person_area:
-                        largest_person_area = area
-                        largest_person_idx = i
+                        # Tính độ sâu trung bình (giá trị nhỏ hơn = gần camera hơn)
+                        depth_region = depth_map[depth_y1:depth_y2, depth_x1:depth_x2]
+                        avg_depth = np.mean(depth_region) if depth_region.size > 0 else 1.0
 
-            # Ưu tiên:
-            # 1. Người có tỷ lệ hợp lý và lớn
-            # 2. Người lớn nhất (nếu không có người tỷ lệ hợp lý)
-            valid_persons = [c for c in main_subject_candidates if c['is_valid_person']]
+                        # Đối tượng gần có weight cao hơn
+                        depth_weight = 1 - avg_depth
+                        center_weight *= (1 + depth_weight)
 
-            if valid_persons:
-                # Lấy người hợp lệ lớn nhất
-                best_candidate = max(valid_persons, key=lambda x: x['area'])
-                main_subject = {
-                    'box': best_candidate['box'],
-                    'class': 'person',
-                    'prominence': best_candidate['area'] / (width * height)
-                }
-                main_subject_idx = best_candidate['idx']
+                    # Lưu giá trị cao nhất
+                    if center_weight > max_center_weight:
+                        max_center_weight = center_weight
+                        main_subject = {
+                            'box': box,
+                            'class': cls,
+                            'prominence': center_weight,
+                            'depth': avg_depth if depth_map is not None else None
+                        }
+                        main_subject_idx = i
+
+            if main_subject:
                 print(
-                    f"Main subject: Valid person with area {best_candidate['area']} and ratio {best_candidate['aspect_ratio']:.2f}")
-            elif largest_person_idx >= 0 and main_subject_candidates:
-                # Nếu không có người hợp lệ, lấy người lớn nhất
-                largest = [c for c in main_subject_candidates if c['idx'] == largest_person_idx][0]
-                main_subject = {
-                    'box': largest['box'],
-                    'class': 'person',
-                    'prominence': largest['area'] / (width * height)
-                }
-                main_subject_idx = largest_person_idx
-                print(f"Main subject: Largest person with area {largest['area']}")
+                    f"Main subject identified from detections (idx={main_subject_idx}, prominence={main_subject['prominence']:.3f})")
 
         # Nếu không tìm thấy đối tượng chính
         if main_subject is None:
@@ -756,195 +668,361 @@ def analyze_facial_expression_advanced(detections, img_data, depth_map=None, spo
         subject_path = f"{debug_dir}/main_subject.jpg"
         cv2.imwrite(subject_path, cv2.cvtColor(subject_img, cv2.COLOR_RGB2BGR))
 
-        # 3. PHÁT HIỆN KHUÔN MẶT VỚI OPENCV
-        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-        profile_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_profileface.xml')
+        # Cải thiện khu vực ước tính khuôn mặt cho vận động viên
+        # Người chạy thường có đầu cao hơn so với phần thân
+        # Sử dụng phần trên lớn hơn (33% thay vì 25%)
+        head_height = int((y2 - y1) * 0.33)  # Tăng từ 25% lên 33%
 
-        # Chuyển sang grayscale
-        gray_subject = cv2.cvtColor(subject_img, cv2.COLOR_RGB2GRAY)
+        # Mở rộng vùng tìm kiếm khuôn mặt hơn một chút
+        face_y1 = max(0, y1 - int(head_height * 0.1))  # Mở rộng lên trên thêm chút
+        face_y2 = min(y1 + head_height, image.shape[0])
+        face_x1 = max(0, x1)
+        face_x2 = min(x2, image.shape[1])
 
-        # Cải thiện tỷ lệ phát hiện khuôn mặt
-        faces = face_cascade.detectMultiScale(gray_subject, 1.05, 3, minSize=(20, 20))
+        # Trích xuất khu vực khuôn mặt ước tính
+        face_region = image[face_y1:face_y2, face_x1:face_x2]
+        face_path = f"{debug_dir}/face_region_estimate.jpg"
+        cv2.imwrite(face_path, cv2.cvtColor(face_region, cv2.COLOR_RGB2BGR))
 
-        # Nếu không tìm thấy, thử với khuôn mặt nghiêng
-        if len(faces) == 0:
-            faces = profile_cascade.detectMultiScale(gray_subject, 1.05, 2, minSize=(20, 20))
+        # 3. TÌM KHUÔN MẶT CHÍNH XÁC HƠN VỚI MTCNN
+        try:
+            from mtcnn import MTCNN
+            detector = MTCNN(min_face_size=20)  # Đặt kích thước khuôn mặt tối thiểu nhỏ hơn
+        except ImportError:
+            print("Installing MTCNN...")
+            os.system("pip install mtcnn")
+            from mtcnn import MTCNN
+            detector = MTCNN(min_face_size=20)
 
-        # Nếu vẫn không tìm thấy, thử với phần trên của đối tượng
-        if len(faces) == 0:
-            # Tạo vùng tìm kiếm mới - phần trên cơ thể (40% phần trên)
-            h, w = subject_img.shape[:2]
-            head_height = int(h * 0.4)
-            head_region = subject_img[0:head_height, 0:w]
+        # Giảm ngưỡng confidence cho ảnh thể thao - chuyển động
+        confidence_threshold = 0.7  # Giảm từ 0.9 xuống 0.7
 
-            if head_region.size > 0:
-                # Lưu để debug
-                head_path = f"{debug_dir}/head_region.jpg"
-                cv2.imwrite(head_path, cv2.cvtColor(head_region, cv2.COLOR_RGB2BGR))
+        # A. Tìm trong vùng đầu ước tính
+        faces = detector.detect_faces(face_region)
+        face_found = False
+        best_face = None
 
-                # Thử phát hiện lại trong vùng đầu
-                gray_head = cv2.cvtColor(head_region, cv2.COLOR_RGB2GRAY)
-                faces = face_cascade.detectMultiScale(gray_head, 1.03, 2, minSize=(15, 15))
+        if faces:
+            print(f"Found {len(faces)} faces in estimated head region")
 
-                # Nếu vẫn không tìm thấy, thử với vùng đầu nghiêng
+            # Lấy khuôn mặt lớn nhất và đáng tin cậy nhất
+            confident_faces = [face for face in faces if face['confidence'] > confidence_threshold]
+            if confident_faces:
+                best_face = max(confident_faces, key=lambda face: face['box'][2] * face['box'][3])
+                face_found = True
+                print(f"Found confident face with confidence: {best_face['confidence']:.2f}")
+
+                # Điều chỉnh tọa độ về khung hình gốc
+                fx, fy, fw, fh = best_face['box']
+                fx += face_x1
+                fy += face_y1
+
+                print(f"Face dimensions: {fw}x{fh}")
+            else:
+                print("No confident face found in head region")
+
+        # B. Nếu không tìm thấy trong vùng đầu, thử với toàn bộ phần trên của cơ thể
+        if not face_found:
+            # Tạo vùng tìm kiếm mới - phần trên cơ thể (50% phần trên)
+            upper_body_y1 = max(0, y1)
+            upper_body_y2 = min(y1 + int((y2 - y1) * 0.5), image.shape[0])
+            upper_body_x1 = max(0, x1)
+            upper_body_x2 = min(x2, image.shape[1])
+
+            upper_body = image[upper_body_y1:upper_body_y2, upper_body_x1:upper_body_x2]
+            upper_body_path = f"{debug_dir}/upper_body.jpg"
+            cv2.imwrite(upper_body_path, cv2.cvtColor(upper_body, cv2.COLOR_RGB2BGR))
+
+            # Tìm khuôn mặt trong phần trên
+            faces = detector.detect_faces(upper_body)
+            if faces:
+                print(f"Found {len(faces)} faces in upper body region")
+
+                # Lấy khuôn mặt lớn nhất và đáng tin cậy nhất
+                confident_faces = [face for face in faces if face['confidence'] > confidence_threshold]
+                if confident_faces:
+                    best_face = max(confident_faces, key=lambda face: face['box'][2] * face['box'][3])
+                    face_found = True
+                    print(f"Found confident face with confidence: {best_face['confidence']:.2f}")
+
+                    # Điều chỉnh tọa độ về khung hình gốc
+                    fx, fy, fw, fh = best_face['box']
+                    fx += upper_body_x1
+                    fy += upper_body_y1
+
+                    print(f"Face dimensions: {fw}x{fh}")
+
+        # C. Nếu vẫn không tìm thấy, thử với toàn bộ đối tượng
+        if not face_found:
+            faces = detector.detect_faces(subject_img)
+            if faces:
+                print(f"Found {len(faces)} faces in full main subject")
+
+                # Lọc ra các khuôn mặt đáng tin cậy
+                confident_faces = [face for face in faces if face['confidence'] > confidence_threshold]
+                if confident_faces:
+                    # Ưu tiên khuôn mặt ở phía trên và lớn
+                    def face_score(face):
+                        fx, fy, fw, fh = face['box']
+                        size_score = fw * fh  # Kích thước lớn tốt hơn
+                        position_score = -fy * 2  # Vị trí cao hơn tốt hơn
+                        return size_score + position_score
+
+                    best_face = max(confident_faces, key=face_score)
+                    face_found = True
+
+                    # Điều chỉnh tọa độ về khung hình gốc
+                    fx, fy, fw, fh = best_face['box']
+                    fx += x1
+                    fy += y1
+
+                    print(f"Face dimensions: {fw}x{fh}")
+                else:
+                    print("No confident face found in subject")
+
+        # D. Nếu vẫn không tìm thấy, sử dụng detector khác nếu có thể
+        if not face_found:
+            try:
+                import cv2
+                # Thử với OpenCV's Haar Cascade - xử lý tốt hơn với góc nhìn khó
+                face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+                profile_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_profileface.xml')
+
+                # Chuyển sang grayscale
+                gray_subject = cv2.cvtColor(subject_img, cv2.COLOR_RGB2GRAY)
+
+                # Phát hiện khuôn mặt nhìn thẳng
+                faces = face_cascade.detectMultiScale(gray_subject, 1.1, 4)
+
+                # Nếu không tìm thấy, thử với khuôn mặt nghiêng
                 if len(faces) == 0:
-                    faces = profile_cascade.detectMultiScale(gray_head, 1.03, 2, minSize=(15, 15))
+                    faces = profile_cascade.detectMultiScale(gray_subject, 1.1, 4)
 
-                # Điều chỉnh tọa độ nếu tìm thấy trong vùng đầu
+                # Nếu phát hiện được
                 if len(faces) > 0:
-                    print(f"Found {len(faces)} faces in head region")
+                    print(f"Found {len(faces)} faces with OpenCV Haar Cascade")
 
-                    # Điều chỉnh tọa độ - chỉ cần thêm y1 vì x1 đã được tính từ đầu subject_img
-                    for i in range(len(faces)):
-                        faces[i] = (faces[i][0], faces[i][1], faces[i][2], faces[i][3])
+                    # Lấy khuôn mặt lớn nhất
+                    best_haar_face = max(faces, key=lambda f: f[2] * f[3])
+                    hx, hy, hw, hh = best_haar_face
 
-        # Nếu vẫn không tìm thấy, sử dụng toàn bộ vùng đầu làm khuôn mặt
-        if len(faces) == 0:
-            h, w = subject_img.shape[:2]
-            # Ước lượng khuôn mặt chiếm 35% trên cùng của đối tượng
-            est_face_h = int(h * 0.35)
-            est_face_w = int(est_face_h * 0.8)  # Aspect ratio ~0.8
-            est_face_x = (w - est_face_w) // 2  # Căn giữa
-            est_face_y = 0
+                    # Chuyển đổi sang định dạng giống MTCNN
+                    best_face = {
+                        'box': (hx, hy, hw, hh),
+                        'confidence': 0.8,  # Giả định confidence
+                        'keypoints': {}
+                    }
 
-            faces = [(est_face_x, est_face_y, est_face_w, est_face_h)]
-            print("Using estimated face region from upper part of subject")
+                    # Điều chỉnh tọa độ về khung hình gốc
+                    fx, fy, fw, fh = hx, hy, hw, hh
+                    fx += x1
+                    fy += y1
 
-        # Kiểm tra nếu tìm thấy khuôn mặt
-        face_found = len(faces) > 0
-        face_img = None
-        fx, fy, fw, fh = 0, 0, 0, 0
+                    face_found = True
+                    print(f"Face found with Haar Cascade: {fw}x{fh}")
+            except Exception as e:
+                print(f"Error using OpenCV Haar Cascade: {str(e)}")
 
-        if face_found:
-            print(f"Found {len(faces)} faces")
-
-            # Lấy khuôn mặt lớn nhất
-            best_face = max(faces, key=lambda f: f[2] * f[3])
-            hx, hy, hw, hh = best_face
-
-            # Điều chỉnh tọa độ về khung hình gốc
-            fx, fy, fw, fh = hx, hy, hw, hh
-
-            # Trích xuất khuôn mặt
-            # Thêm padding xung quanh khuôn mặt để cải thiện kết quả
-            padding = max(10, int(hw * 0.1))  # Padding tỷ lệ với kích thước khuôn mặt
-            face_x1 = max(0, hx - padding)
-            face_y1 = max(0, hy - padding)
-            face_x2 = min(subject_img.shape[1], hx + hw + padding)
-            face_y2 = min(subject_img.shape[0], hy + hh + padding)
-
-            face_img = subject_img[face_y1:face_y2, face_x1:face_x2]
-
-            # Lưu khuôn mặt để debug
-            best_face_path = f"{debug_dir}/best_face.jpg"
-            cv2.imwrite(best_face_path, cv2.cvtColor(face_img, cv2.COLOR_RGB2BGR))
-            print(f"Face dimensions: {face_img.shape[1]}x{face_img.shape[0]}")
-
-            # Điều chỉnh tọa độ khuôn mặt về không gian hình ảnh gốc
-            fx += x1
-            fy += y1
-
-        if not face_found or face_img is None or face_img.size == 0:
+        # Kiểm tra xem có tìm thấy khuôn mặt không
+        if not face_found:
             print("No face detected after trying multiple methods")
             expression_results['debug_info']['reason'] = "No face detected in the subject"
             return expression_results
 
-        # 4. PHÂN TÍCH BIỂU CẢM SỬ DỤNG HSEMOTION
-        try:
-            # Kiểm tra xem HSEmotion đã được cài đặt chưa
-            hsemotion_installed = False
-
-            # Kiểm tra bằng subprocess
-            result = subprocess.run([sys.executable, "-m", "pip", "list"],
-                                    capture_output=True, text=True)
-
-            if "hsemotion" in result.stdout or "face-emotion-recognition" in result.stdout:
-                hsemotion_installed = True
-                print("HSEmotion đã được cài đặt")
-
-            # Thử import trực tiếp
+        # 4. KIỂM TRA HƯỚNG KHUÔN MẶT VÀ ĐẶC ĐIỂM KHUÔN MẶT
+        def verify_face_orientation(face_img, keypoints=None):
+            """Kiểm tra xem khuôn mặt có hướng về phía camera không"""
+            # Nếu không có keypoints, thử nhận diện với dlib
             try:
-                from hsemotion.facial_emotions import HSEmotionRecognizer
-                hsemotion_installed = True
+                # Chuyển đổi ảnh sang grayscale
+                gray = cv2.cvtColor(face_img, cv2.COLOR_RGB2GRAY)
+
+                # Kiểm tra keypoints từ MTCNN
+                if keypoints and all(k in keypoints for k in ['left_eye', 'right_eye', 'nose']):
+                    print("Verified face using MTCNN keypoints")
+                    return True
+
+                # Kiểm tra bằng phân bố gradient và các đặc trưng khuôn mặt
+                sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+                sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+                gradient_mag = np.sqrt(sobelx ** 2 + sobely ** 2)
+
+                # Chia ảnh thành grid 3x3
+                h, w = gray.shape
+                cell_h, cell_w = h // 3, w // 3
+
+                # Kiểm tra đặc trưng khuôn mặt phân bố
+                center_cell = gradient_mag[cell_h:2 * cell_h, cell_w:2 * cell_w]
+                center_mean = np.mean(center_cell)
+
+                # Vùng mắt (thường là phần trên của khuôn mặt)
+                eye_region = gradient_mag[:cell_h, :]
+                eye_mean = np.mean(eye_region)
+
+                # Vùng miệng (thường là phần dưới của khuôn mặt)
+                mouth_region = gradient_mag[2 * cell_h:, :]
+                mouth_mean = np.mean(mouth_region)
+
+                # Khuôn mặt thường có đặc trưng tại mắt và miệng (gradient cao)
+                if eye_mean > 30 and mouth_mean > 20 and center_mean > 15:
+                    print(
+                        f"Face features verified: eye={eye_mean:.1f}, mouth={mouth_mean:.1f}, center={center_mean:.1f}")
+                    return True
+                else:
+                    print(
+                        f"Insufficient face features: eye={eye_mean:.1f}, mouth={mouth_mean:.1f}, center={center_mean:.1f}")
+
+                    # Fallback: Kiểm tra phân phối grayscale
+                    hist = cv2.calcHist([gray], [0], None, [256], [0, 256])
+                    hist_norm = cv2.normalize(hist, hist, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX)
+
+                    # Tính entropy của histogram (khuôn mặt thường có entropy cao)
+                    hist_flat = hist_norm.flatten() + 1e-7  # Tránh log(0)
+                    entropy = -np.sum(hist_flat * np.log2(hist_flat))
+
+                    # Tính độ tương phản (khuôn mặt thường có độ tương phản cao)
+                    contrast = np.std(gray)
+
+                    # Kiểm tra phân phối màu da
+                    # (Trong không gian HSV, màu da con người có hue khoảng 0-50)
+                    hsv = cv2.cvtColor(face_img, cv2.COLOR_RGB2HSV)
+                    h, s, v = cv2.split(hsv)
+
+                    # Tính phần trăm pixel trong vùng màu da
+                    skin_mask = ((h >= 0) & (h <= 50) & (s >= 25) & (s <= 230)) | (h < 20)
+                    skin_percent = np.sum(skin_mask) / (face_img.shape[0] * face_img.shape[1])
+
+                    # In thông tin điểm số
+                    print(
+                        f"Face verification: entropy={entropy:.2f}, contrast={contrast:.2f}, skin%={skin_percent:.2f}")
+
+                    # Xác định dựa trên ngưỡng
+                    has_face_features = (entropy > 6.5 and contrast > 40 and skin_percent > 0.3)
+                    if not has_face_features:
+                        print("Failed face verification with entropy/contrast/skin check")
+                    return has_face_features
+
+            except Exception as e:
+                print(f"Error in face orientation check: {str(e)}")
+                return False
+
+        # Đảm bảo tọa độ nằm trong ảnh
+        fx = max(0, fx)
+        fy = max(0, fy)
+        fx2 = min(image.shape[1], fx + fw)
+        fy2 = min(image.shape[0], fy + fh)
+        fw = fx2 - fx
+        fh = fy2 - fy
+
+        # Trích xuất khuôn mặt đã điều chỉnh
+        face_img = image[fy:fy + fh, fx:fx + fw]
+
+        # Lưu khuôn mặt để debug
+        best_face_path = f"{debug_dir}/best_face.jpg"
+        cv2.imwrite(best_face_path, cv2.cvtColor(face_img, cv2.COLOR_RGB2BGR))
+        print(f"Best face: {best_face_path}")
+
+        # Kiểm tra nội dung khuôn mặt và hướng
+        if not verify_face_orientation(face_img, best_face.get('keypoints', None)):
+            print("Face verification failed - detected area is not a frontal face")
+            expression_results['debug_info']['reason'] = "Detected area is not a frontal face"
+            return expression_results
+
+        # Kiểm tra keypoints nếu có
+        if best_face and 'keypoints' in best_face:
+            # Lấy keypoints
+            keypoints = best_face['keypoints']
+
+            # MTCNN trả về 5 điểm: left_eye, right_eye, nose, mouth_left, mouth_right
+            required_points = ['left_eye', 'right_eye', 'nose', 'mouth_left', 'mouth_right']
+            found_points = [point for point in required_points if point in keypoints]
+
+            # Yêu cầu ít nhất 3 điểm mốc để phân tích biểu cảm
+            if len(found_points) < 3:
+                print(f"Not enough facial keypoints detected: {len(found_points)}/5")
+                expression_results['debug_info']['reason'] = f"Not enough facial keypoints: {len(found_points)}/5"
+                return expression_results
+            else:
+                print(f"Found {len(found_points)}/5 facial keypoints")
+
+        # 5. PHÂN TÍCH BIỂU CẢM SỬ DỤNG DEEPFACE
+        try:
+            # Kiểm tra và cài đặt DeepFace nếu cần
+            try:
+                from deepface import DeepFace
             except ImportError:
-                if not hsemotion_installed:
-                    print("Đang cài đặt HSEmotion...")
-                    subprocess.run([sys.executable, "-m", "pip", "install",
-                                    "git+https://github.com/HSE-asavchenko/face-emotion-recognition.git"],
-                                   check=True)
-                    from hsemotion.facial_emotions import HSEmotionRecognizer
+                print("Installing DeepFace library...")
+                os.system("pip install deepface")
+                from deepface import DeepFace
 
-            print("Bắt đầu phân tích cảm xúc với HSEmotion...")
-            # Tiếp tục code phân tích cảm xúc...
-            # Khởi tạo recognizer với mô hình nhỏ để tăng tốc độ
-            recognizer = HSEmotionRecognizer(model_name='enet_b0_8', device='cpu')
+            print("Starting emotion analysis with DeepFace...")
 
-            # Đảm bảo kích thước khuôn mặt tối thiểu cho mô hình
-            min_face_size = 64
-            if face_img.shape[0] < min_face_size or face_img.shape[1] < min_face_size:
-                face_img = cv2.resize(face_img, (max(min_face_size, face_img.shape[1]),
-                                                 max(min_face_size, face_img.shape[0])))
+            # Lưu ảnh khuôn mặt tạm thời để DeepFace xử lý
+            temp_face_path = f"{debug_dir}/temp_face.jpg"
+            cv2.imwrite(temp_face_path, cv2.cvtColor(face_img, cv2.COLOR_RGB2BGR))
 
-            # Phân tích cảm xúc
-            emotion, emotion_scores = recognizer.predict_emotions(face_img)
+            # Phân tích cảm xúc với DeepFace với các tùy chọn mở rộng cho ảnh thể thao
+            try:
+                analysis = DeepFace.analyze(temp_face_path,
+                                            actions=['emotion'],
+                                            enforce_detection=False,
+                                            detector_backend='opencv')
+            except:
+                print("Retrying with different backend...")
+                analysis = DeepFace.analyze(temp_face_path,
+                                            actions=['emotion'],
+                                            enforce_detection=False,
+                                            detector_backend='ssd')
 
-            print(f"HSEmotion phát hiện cảm xúc: {emotion}")
-            print(f"Điểm số cảm xúc: {emotion_scores}")
+            # Xử lý kết quả
+            if isinstance(analysis, list):
+                emotion_data = analysis[0]
+            else:
+                emotion_data = analysis
 
-            # Chuyển đổi tên cảm xúc
-            emotion_mapping = {
-                'Neutral': 'neutral',
-                'Happiness': 'happy',
-                'Sadness': 'sad',
-                'Surprise': 'surprise',
-                'Fear': 'fear',
-                'Disgust': 'disgust',
-                'Anger': 'angry',
-                'Contempt': 'contempt'
-            }
+            dominant_emotion = emotion_data['dominant_emotion']
+            emotion_scores = emotion_data['emotion']
 
-            dominant_emotion = emotion_mapping.get(emotion, emotion.lower())
+            print(f"DeepFace detected emotion: {dominant_emotion}")
+            print(f"Emotion scores: {emotion_scores}")
 
-            # Chuyển đổi điểm số
-            emotion_scores_dict = {}
-            for i, score in enumerate(emotion_scores):
-                # Lấy tên cảm xúc theo thứ tự của HSEmotion
-                hsemotion_emotions = ['Neutral', 'Happiness', 'Sadness', 'Surprise', 'Fear', 'Disgust', 'Anger',
-                                      'Contempt']
-                emotion_name = emotion_mapping.get(hsemotion_emotions[i], hsemotion_emotions[i].lower())
-                emotion_scores_dict[emotion_name] = score
-
-            # Tính cường độ cảm xúc
-            dominant_score = max(emotion_scores)
-            emotion_intensity = min(0.95, max(0.2, dominant_score))
+            # Tính cường độ cảm xúc từ điểm số
+            dominant_score = emotion_scores[dominant_emotion]
+            other_emotions = [v for k, v in emotion_scores.items() if k != dominant_emotion]
+            avg_other = sum(other_emotions) / len(other_emotions) if other_emotions else 0
+            emotion_intensity = min(0.95, max(0.2, dominant_score / 100))
 
         except Exception as e:
-            print(f"HSEmotion analysis failed: {str(e)}")
+            print(f"DeepFace analysis failed: {str(e)}")
             print("Falling back to basic emotion analysis...")
 
-            # Phân tích đơn giản dựa trên độ tương phản và độ sáng
+            # Fallback to basic analysis if DeepFace fails
             gray = cv2.cvtColor(face_img, cv2.COLOR_RGB2GRAY)
             brightness = np.mean(gray) / 255.0
             contrast = np.std(gray) / 128.0
 
-            # Tính gradient (texture)
+            # Calculate image histogram (simplified)
+            hist = cv2.calcHist([gray], [0], None, [8], [0, 256])
+            hist = cv2.normalize(hist, hist).flatten()
+
+            # Calculate image gradient (texture)
             sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
             sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
             gradient_mean = np.mean(np.sqrt(sobelx ** 2 + sobely ** 2)) / 128.0
 
-            # Chia ảnh thành vùng
+            # Divide image into regions
             h, w = gray.shape
-            top = gray[:h // 3, :]  # Vùng mắt
-            middle = gray[h // 3:2 * h // 3, :]  # Vùng mũi
-            bottom = gray[2 * h // 3:, :]  # Vùng miệng
+            top = gray[:h // 3, :]  # Forehead/eyes area
+            middle = gray[h // 3:2 * h // 3, :]  # Nose area
+            bottom = gray[2 * h // 3:, :]  # Mouth/chin area
 
-            # Tính các đặc trưng theo vùng
+            # Calculate features by region
             top_contrast = np.std(top) / 128.0
             middle_contrast = np.std(middle) / 128.0
             bottom_contrast = np.std(bottom) / 128.0
 
-            # Khởi tạo điểm số cảm xúc
-            emotion_scores_dict = {
+            # Initialize emotions
+            emotion_scores = {
                 'neutral': 0.10,
                 'happy': 0.10,
                 'surprise': 0.10,
@@ -954,47 +1032,47 @@ def analyze_facial_expression_advanced(detections, img_data, depth_map=None, spo
                 'disgust': 0.10
             }
 
-            # Phân tích độ sáng & tương phản
-            if brightness > 0.6:  # Sáng -> vui/tích cực
-                emotion_scores_dict['happy'] += 0.15
-                emotion_scores_dict['neutral'] -= 0.05
-            elif brightness < 0.4:  # Tối -> nghiêm trọng/tiêu cực
-                emotion_scores_dict['sad'] += 0.10
-                emotion_scores_dict['angry'] += 0.05
-                emotion_scores_dict['happy'] -= 0.05
+            # Analyze brightness & contrast
+            if brightness > 0.6:  # Bright -> happy/positive
+                emotion_scores['happy'] += 0.15
+                emotion_scores['neutral'] -= 0.05
+            elif brightness < 0.4:  # Dark -> serious/negative
+                emotion_scores['sad'] += 0.10
+                emotion_scores['angry'] += 0.05
+                emotion_scores['happy'] -= 0.05
 
-            # Phân tích texture
-            if gradient_mean > 0.25:  # Texture cao -> biểu cảm mạnh
-                emotion_scores_dict['surprise'] += 0.15
-                emotion_scores_dict['happy'] += 0.05
-                emotion_scores_dict['neutral'] -= 0.10
+            # Analyze texture
+            if gradient_mean > 0.25:  # High texture -> strong expression
+                emotion_scores['surprise'] += 0.15
+                emotion_scores['happy'] += 0.05
+                emotion_scores['neutral'] -= 0.10
 
-            # Phân tích vùng miệng
+            # Mouth area analysis
             if bottom_contrast > 0.20:
                 if brightness > 0.45:
-                    emotion_scores_dict['happy'] += 0.25
+                    emotion_scores['happy'] += 0.25
                 else:
-                    emotion_scores_dict['surprise'] += 0.20
+                    emotion_scores['surprise'] += 0.20
 
-            # Đảm bảo không có giá trị âm
-            emotion_scores_dict = {k: max(0.01, v) for k, v in emotion_scores_dict.items()}
+            # Ensure no negative values
+            emotion_scores = {k: max(0.01, v) for k, v in emotion_scores.items()}
 
-            # Chuẩn hóa
-            total = sum(emotion_scores_dict.values())
-            emotion_scores_dict = {k: v / total for k, v in emotion_scores_dict.items()}
+            # Normalize
+            total = sum(emotion_scores.values())
+            emotion_scores = {k: v / total for k, v in emotion_scores.items()}
 
-            # Lấy cảm xúc chính
-            dominant_emotion = max(emotion_scores_dict, key=emotion_scores_dict.get)
-            dominant_score = emotion_scores_dict[dominant_emotion]
+            # Get dominant emotion
+            dominant_emotion = max(emotion_scores, key=emotion_scores.get)
+            dominant_score = emotion_scores[dominant_emotion]
 
-            # Tính cường độ
-            other_scores = [v for k, v in emotion_scores_dict.items() if k != dominant_emotion]
+            # Calculate intensity
+            other_scores = [v for k, v in emotion_scores.items() if k != dominant_emotion]
             avg_other = sum(other_scores) / len(other_scores) if other_scores else 0
             emotion_intensity = max(0.2, min(0.95, 0.5 + (dominant_score - avg_other)))
 
             print(f"Basic detected emotion: {dominant_emotion}")
 
-        # 5. PHÂN TÍCH NGỮ CẢNH THỂ THAO
+        # 6. PHÂN TÍCH NGỮ CẢNH THỂ THAO
         # Xác định loại thể thao
         sport_type = "Unknown"
         if isinstance(sports_analysis, dict):
@@ -1003,11 +1081,11 @@ def analyze_facial_expression_advanced(detections, img_data, depth_map=None, spo
 
         # Mức độ hành động
         action_level = 0
-        if "action_analysis" in sports_analysis:
-            action_level = sports_analysis["action_analysis"].get("action_level", 0)
+        if "action_analysis" in locals() and "action_level" in locals()["action_analysis"]:
+            action_level = locals()["action_analysis"]["action_level"]
 
         # Điều chỉnh biểu cảm dựa trên ngữ cảnh thể thao
-        contextual_emotions = emotion_scores_dict.copy()
+        contextual_emotions = emotion_scores.copy()
 
         # Các môn thể thao đối kháng
         combat_sports = ['Boxing', 'Wrestling', 'Martial Arts']
@@ -1024,7 +1102,7 @@ def analyze_facial_expression_advanced(detections, img_data, depth_map=None, spo
             print(f"Adjusting emotions for combat sport: {sport_type}")
             # Tăng mạnh cảm xúc 'determination', 'angry', v.v. trong thể thao đối kháng
             contextual_emotions['angry'] = contextual_emotions.get('angry', 0) * 1.3
-            contextual_emotions['contempt'] = contextual_emotions.get('contempt', 0) * 1.5
+            contextual_emotions['fear'] = contextual_emotions.get('fear', 0) * 1.2
             emotion_intensity = min(0.95, emotion_intensity * 1.2)
 
         elif sport_type in team_sports:
@@ -1038,9 +1116,7 @@ def analyze_facial_expression_advanced(detections, img_data, depth_map=None, spo
         elif sport_type in track_sports or 'Track and Field' in sport_type:
             print(f"Adjusting emotions for track sport")
             # Vận động viên điền kinh thường thể hiện quyết tâm/nỗ lực
-            if 'contempt' in contextual_emotions:
-                contextual_emotions['contempt'] = contextual_emotions.get('contempt', 0) * 1.5  # quyết tâm
-            contextual_emotions['angry'] = contextual_emotions.get('angry', 0) * 1.2  # quyết tâm thay thế
+            contextual_emotions['angry'] = contextual_emotions.get('angry', 0) * 1.2  # quyết tâm
             contextual_emotions['happy'] = contextual_emotions.get('happy', 0) * 1.1  # phấn khích
             emotion_intensity = min(0.95, emotion_intensity * 1.3)  # cường độ cao
 
@@ -1072,12 +1148,11 @@ def analyze_facial_expression_advanced(detections, img_data, depth_map=None, spo
             emotional_value = 'Low'
 
         # Xây dựng kết quả cuối cùng
-        best_face_path = f"{debug_dir}/best_face.jpg"
         expression_results = {
             'has_faces': True,
             'dominant_emotion': adjusted_emotion,
             'original_emotion': dominant_emotion,
-            'emotion_scores': emotion_scores_dict,
+            'emotion_scores': emotion_scores,
             'contextual_scores': contextual_emotions,
             'emotion_intensity': emotion_intensity,
             'emotional_value': emotional_value,
@@ -1100,72 +1175,6 @@ def analyze_facial_expression_advanced(detections, img_data, depth_map=None, spo
         traceback.print_exc()
         return {'has_faces': False, 'error': str(e), 'debug_info': {'reason': f"Error: {str(e)}"}}
 
-
-def identify_main_subject(detections, image_shape):
-    """Cải tiến xác định đối tượng chính cho ảnh thể thao"""
-
-    if not isinstance(detections, dict) or 'boxes' not in detections:
-        return None
-
-    # Heuristic cho người trong ảnh thể thao
-    main_subject = None
-    max_score = 0
-
-    height, width = image_shape[:2]
-    center_x, center_y = width // 2, height // 2
-
-    for i, cls in enumerate(detections['classes']):
-        if cls == 'person':
-            box = detections['boxes'][i]
-            x1, y1, x2, y2 = box
-
-            # Tính diện tích và vị trí trung tâm
-            area = (x2 - x1) * (y2 - y1)
-            area_ratio = area / (width * height)  # Tỷ lệ so với ảnh
-
-            box_center_x = (x1 + x2) // 2
-            box_center_y = (y1 + y2) // 2
-
-            # TÂM ĐIỂM QUAN TRỌNG: Tính khoảng cách đến trung tâm ảnh
-            # Giảm hệ số 2.5 để tăng ưu tiên cho đối tượng ở trung tâm
-            dist_to_center = np.sqrt(((box_center_x - center_x) / width) ** 2 +
-                                     ((box_center_y - center_y) / height) ** 2) / 2.5
-
-            # Tính aspect ratio - quan trọng để xác định toàn thân
-            aspect_ratio = (y2 - y1) / (x2 - x1) if (x2 - x1) > 0 else 0
-
-            # Đánh giá phức hợp
-            prominence = 0
-
-            # 1. Kích thước (40% -> ưu tiên đối tượng lớn)
-            size_score = area_ratio * 5
-            prominence += size_score * 0.4
-
-            # 2. Vị trí trung tâm (45% -> tăng mạnh từ 20%)
-            center_score = 1 - min(1.0, dist_to_center)
-            prominence += center_score * 0.45
-
-            # 3. Đánh giá aspect ratio (15%)
-            ratio_score = 0
-            if 1.5 <= aspect_ratio <= 3.0:  # Tỷ lệ lý tưởng cho toàn thân người
-                ratio_score = 1.0
-            elif 1.0 <= aspect_ratio <= 4.0:  # Chấp nhận được
-                ratio_score = 0.5
-            else:  # Có thể chỉ là bộ phận cơ thể
-                ratio_score = 0.2
-            prominence += ratio_score * 0.15
-
-            if prominence > max_score:
-                max_score = prominence
-                main_subject = {
-                    'box': box,
-                    'class': cls,
-                    'prominence': prominence,
-                    'aspect_ratio': aspect_ratio,
-                    'area_ratio': area_ratio
-                }
-
-    return main_subject
 
 def visualize_emotion_results(face_img, emotion_analysis):
     """Tạo hiển thị chuyên nghiệp cho phân tích biểu cảm khuôn mặt"""
