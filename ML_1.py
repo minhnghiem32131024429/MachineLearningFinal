@@ -1,4 +1,7 @@
-import torch, os, cv2, numpy as np, matplotlib.pyplot as plt
+import os
+
+os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
+import torch, cv2, numpy as np, matplotlib.pyplot as plt
 from PIL import Image
 from torchvision import transforms
 from scipy import ndimage
@@ -7,9 +10,6 @@ import argparse
 import sys
 import matplotlib.patches as patches
 from matplotlib.colors import LinearSegmentedColormap
-import os
-# Thiết lập các biến môi trường trước khi import các module khác
-os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 
 # Sửa lỗi matplotlib warning khi chạy trong thread khác
 import matplotlib
@@ -586,8 +586,9 @@ def analyze_facial_expression_advanced(detections, img_data, depth_map=None, spo
         main_subject_idx = -1
 
         # A. Từ phân tích sports_analysis
-        if sports_analysis and 'key_subjects' in sports_analysis and sports_analysis['key_subjects']:
-            for idx, subject in enumerate(sports_analysis['key_subjects']):
+        # FIX: Adjust how we access the nested dictionary
+        if sports_analysis and 'sports_analysis' in sports_analysis and 'key_subjects' in sports_analysis['sports_analysis']:
+            for idx, subject in enumerate(sports_analysis['sports_analysis']['key_subjects']):
                 if subject['class'] == 'person':
                     main_subject = subject
                     main_subject_idx = idx
@@ -684,23 +685,41 @@ def analyze_facial_expression_advanced(detections, img_data, depth_map=None, spo
         face_path = f"{debug_dir}/face_region_estimate.jpg"
         cv2.imwrite(face_path, cv2.cvtColor(face_region, cv2.COLOR_RGB2BGR))
 
-        # 3. TÌM KHUÔN MẶT CHÍNH XÁC HƠN VỚI MTCNN
-        try:
-            from mtcnn import MTCNN
-            detector = MTCNN(min_face_size=20)  # Đặt kích thước khuôn mặt tối thiểu nhỏ hơn
-        except ImportError:
-            print("Installing MTCNN...")
-            os.system("pip install mtcnn")
-            from mtcnn import MTCNN
-            detector = MTCNN(min_face_size=20)
+        # 3. TÌM KHUÔN MẶT CHÍNH XÁC HƠN
+        print("Using OpenCV for face detection instead of MTCNN")
+        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+        profile_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_profileface.xml')
 
-        # Giảm ngưỡng confidence cho ảnh thể thao - chuyển động
-        confidence_threshold = 0.7  # Giảm từ 0.9 xuống 0.7
+        confidence_threshold = 0.3  # Threshold for confident face detection
 
         # A. Tìm trong vùng đầu ước tính
-        faces = detector.detect_faces(face_region)
+        # Convert to grayscale for OpenCV face detection
+        gray_face_region = cv2.cvtColor(face_region, cv2.COLOR_RGB2GRAY)
+        faces_cv = face_cascade.detectMultiScale(gray_face_region, 1.1, 4)
+        faces = []
+        for (x, y, w, h) in faces_cv:
+            faces.append({
+                'box': (x, y, w, h),
+                'confidence': 0.8,  # Default confidence
+                'keypoints': {}
+            })
+
         face_found = False
         best_face = None
+
+        if face_found and ('keypoints' not in best_face or not best_face['keypoints']):
+            # Tính toán vị trí điểm mốc dựa trên hộp khuôn mặt
+            fx, fy, fw, fh = best_face['box']
+
+            # Tỷ lệ khuôn mặt chuẩn
+            best_face['keypoints'] = {
+                'left_eye': (fx + int(fw * 0.3), fy + int(fh * 0.35)),
+                'right_eye': (fx + int(fw * 0.7), fy + int(fh * 0.35)),
+                'nose': (fx + int(fw * 0.5), fy + int(fh * 0.5)),
+                'mouth_left': (fx + int(fw * 0.35), fy + int(fh * 0.75)),
+                'mouth_right': (fx + int(fw * 0.65), fy + int(fh * 0.75))
+            }
+            print("Đã thêm điểm mốc khuôn mặt ước tính")
 
         if faces:
             print(f"Found {len(faces)} faces in estimated head region")
@@ -734,7 +753,16 @@ def analyze_facial_expression_advanced(detections, img_data, depth_map=None, spo
             cv2.imwrite(upper_body_path, cv2.cvtColor(upper_body, cv2.COLOR_RGB2BGR))
 
             # Tìm khuôn mặt trong phần trên
-            faces = detector.detect_faces(upper_body)
+            gray_upper_body = cv2.cvtColor(upper_body, cv2.COLOR_RGB2GRAY)
+            faces_cv = face_cascade.detectMultiScale(gray_upper_body, 1.1, 4)
+            faces = []
+            for (x, y, w, h) in faces_cv:
+                faces.append({
+                    'box': (x, y, w, h),
+                    'confidence': 0.8,  # Default confidence
+                    'keypoints': {}
+                })
+
             if faces:
                 print(f"Found {len(faces)} faces in upper body region")
 
@@ -754,7 +782,16 @@ def analyze_facial_expression_advanced(detections, img_data, depth_map=None, spo
 
         # C. Nếu vẫn không tìm thấy, thử với toàn bộ đối tượng
         if not face_found:
-            faces = detector.detect_faces(subject_img)
+            gray_subject = cv2.cvtColor(subject_img, cv2.COLOR_RGB2GRAY)
+            faces_cv = face_cascade.detectMultiScale(gray_subject, 1.1, 4)
+            faces = []
+            for (x, y, w, h) in faces_cv:
+                faces.append({
+                    'box': (x, y, w, h),
+                    'confidence': 0.8,  # Default confidence
+                    'keypoints': {}
+                })
+
             if faces:
                 print(f"Found {len(faces)} faces in full main subject")
 
@@ -780,30 +817,22 @@ def analyze_facial_expression_advanced(detections, img_data, depth_map=None, spo
                 else:
                     print("No confident face found in subject")
 
-        # D. Nếu vẫn không tìm thấy, sử dụng detector khác nếu có thể
+        # D. Nếu vẫn không tìm thấy, thử với profile face detection
         if not face_found:
             try:
-                import cv2
                 # Thử với OpenCV's Haar Cascade - xử lý tốt hơn với góc nhìn khó
-                face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-                profile_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_profileface.xml')
-
                 # Chuyển sang grayscale
                 gray_subject = cv2.cvtColor(subject_img, cv2.COLOR_RGB2GRAY)
 
-                # Phát hiện khuôn mặt nhìn thẳng
-                faces = face_cascade.detectMultiScale(gray_subject, 1.1, 4)
-
-                # Nếu không tìm thấy, thử với khuôn mặt nghiêng
-                if len(faces) == 0:
-                    faces = profile_cascade.detectMultiScale(gray_subject, 1.1, 4)
+                # Phát hiện khuôn mặt nghiêng
+                faces_cv = profile_cascade.detectMultiScale(gray_subject, 1.1, 4)
 
                 # Nếu phát hiện được
-                if len(faces) > 0:
-                    print(f"Found {len(faces)} faces with OpenCV Haar Cascade")
+                if len(faces_cv) > 0:
+                    print(f"Found {len(faces_cv)} faces with OpenCV Profile Cascade")
 
                     # Lấy khuôn mặt lớn nhất
-                    best_haar_face = max(faces, key=lambda f: f[2] * f[3])
+                    best_haar_face = max(faces_cv, key=lambda f: f[2] * f[3])
                     hx, hy, hw, hh = best_haar_face
 
                     # Chuyển đổi sang định dạng giống MTCNN
@@ -929,21 +958,21 @@ def analyze_facial_expression_advanced(detections, img_data, depth_map=None, spo
             return expression_results
 
         # Kiểm tra keypoints nếu có
-        if best_face and 'keypoints' in best_face:
-            # Lấy keypoints
-            keypoints = best_face['keypoints']
+        if best_face:
+            # Luôn sử dụng điểm mốc ước tính nếu không có sẵn
+            if 'keypoints' not in best_face or not best_face['keypoints']:
+                fx, fy, fw, fh = best_face['box']
 
-            # MTCNN trả về 5 điểm: left_eye, right_eye, nose, mouth_left, mouth_right
-            required_points = ['left_eye', 'right_eye', 'nose', 'mouth_left', 'mouth_right']
-            found_points = [point for point in required_points if point in keypoints]
+                best_face['keypoints'] = {
+                    'left_eye': (fx + int(fw * 0.3), fy + int(fh * 0.35)),
+                    'right_eye': (fx + int(fw * 0.7), fy + int(fh * 0.35)),
+                    'nose': (fx + int(fw * 0.5), fy + int(fh * 0.5)),
+                    'mouth_left': (fx + int(fw * 0.35), fy + int(fh * 0.75)),
+                    'mouth_right': (fx + int(fw * 0.65), fy + int(fh * 0.75))
+                }
+                print("Đã thêm điểm mốc khuôn mặt ước tính")
 
-            # Yêu cầu ít nhất 3 điểm mốc để phân tích biểu cảm
-            if len(found_points) < 3:
-                print(f"Not enough facial keypoints detected: {len(found_points)}/5")
-                expression_results['debug_info']['reason'] = f"Not enough facial keypoints: {len(found_points)}/5"
-                return expression_results
-            else:
-                print(f"Found {len(found_points)}/5 facial keypoints")
+            print("Sử dụng điểm mốc khuôn mặt cho phân tích biểu cảm")
 
         # 5. PHÂN TÍCH BIỂU CẢM SỬ DỤNG DEEPFACE
         try:
@@ -1757,9 +1786,9 @@ def visualize_sports_results(img_data, detections, depth_map, sports_analysis, a
         ax_info.axis('off')
         ax_info.set_title("Facial Expression")
 
-    plt.tight_layout()
+    #plt.tight_layout()
     plt.savefig("sports_analysis_results.png", dpi=150)
-    plt.show()
+    #plt.show()
 
     # Print detailed analysis
     print("\n==== SPORTS IMAGE ANALYSIS ====")
