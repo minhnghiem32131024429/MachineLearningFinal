@@ -1,7 +1,16 @@
 import sys
+import site
+# Thêm thư mục site-packages vào path để tìm các module đã cài đặt
+sys.path.append(site.getsitepackages()[0])
 import os
 import numpy as np
-
+import torch
+import torchvision
+import torchvision.transforms as transforms
+from PIL import Image
+import requests
+from io import BytesIO
+from torchvision.models import resnet50, ResNet50_Weights
 # Đặt biến môi trường trước khi import các thư viện khác
 os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 
