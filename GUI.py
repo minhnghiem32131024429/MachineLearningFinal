@@ -182,10 +182,11 @@ class ImageDisplayWidget(QWidget):
         self.title_label.setStyleSheet("font-size: 16px; font-weight: bold; margin-bottom: 10px;")
         layout.addWidget(self.title_label)
 
-        # Scroll area cho ảnh
-        self.scroll_area = QScrollArea()
-        self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setAlignment(Qt.AlignCenter)
+        # Container để giữ ảnh và tự động co giãn
+        self.image_container = QWidget()
+        self.image_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        container_layout = QVBoxLayout(self.image_container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
 
         # Label để chứa ảnh
         self.image_label = QLabel("No image")
@@ -195,15 +196,44 @@ class ImageDisplayWidget(QWidget):
             border-radius: 5px;
             padding: 10px;
         """)
+        self.image_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        self.scroll_area.setWidget(self.image_label)
-        layout.addWidget(self.scroll_area)
+        container_layout.addWidget(self.image_label)
+        layout.addWidget(self.image_container)
+
+        # Lưu pixmap gốc để có thể resize
+        self.original_pixmap = None
+
+        # Kết nối sự kiện resize
+        self.image_container.resizeEvent = self.on_container_resize
 
     def set_image(self, pixmap=None):
         if pixmap:
-            self.image_label.setPixmap(pixmap)
+            self.original_pixmap = pixmap
+            # Hiển thị ảnh với kích thước thích hợp
+            self.update_image_size()
         else:
+            self.original_pixmap = None
             self.image_label.setText("No image available")
+
+    def on_container_resize(self, event):
+        # Khi container thay đổi kích thước, cập nhật ảnh
+        self.update_image_size()
+
+    def update_image_size(self):
+        if self.original_pixmap:
+            # Lấy kích thước có sẵn của container
+            container_size = self.image_container.size()
+
+            # Co giãn ảnh để vừa với container, giữ nguyên tỷ lệ
+            scaled_pixmap = self.original_pixmap.scaled(
+                container_size.width() - 20,  # Trừ đi padding
+                container_size.height() - 20,  # Trừ đi padding
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
+
+            self.image_label.setPixmap(scaled_pixmap)
 
 
 # Class chính của ứng dụng
@@ -703,23 +733,9 @@ class SportsAnalysisApp(QMainWindow):
             elif 'contextual_scores' in facial_analysis:
                 self.emotion_chart.update_chart(facial_analysis['contextual_scores'])
         else:
-            # Nếu không có phân tích khuôn mặt, hiển thị thông báo
             self.face_image.setText("No face detected")
             self.emotion_label.setText("No emotion detected")
             self.emotion_chart.update_chart({})
-
-            # Tìm ảnh khuôn mặt trong các thư mục debug
-            face_debug_dirs = ["face_debug", "debug", "."]
-            for dir in face_debug_dirs:
-                if os.path.exists(f"{dir}/best_face.jpg"):
-                    try:
-                        face_pixmap = QPixmap(f"{dir}/best_face.jpg")
-                        face_pixmap = face_pixmap.scaled(200, 200, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                        self.face_image.setPixmap(face_pixmap)
-                        self.emotion_label.setText("Face detected but no emotion analysis")
-                        break
-                    except:
-                        pass
 
     def update_stats_tab(self, result):
         """Cập nhật tab thống kê"""
@@ -785,6 +801,25 @@ class SportsAnalysisApp(QMainWindow):
                 qt_material.apply_stylesheet(self, theme=theme)
             except Exception as e:
                 print(f"Error changing theme: {e}")
+
+    def resizeEvent(self, event):
+        """Xử lý khi cửa sổ chính thay đổi kích thước"""
+        # Gọi phương thức gốc của class cha
+        super().resizeEvent(event)
+
+        # Kích hoạt cập nhật kích thước cho tất cả các ảnh
+        if hasattr(self, 'original_image_display'):
+            self.original_image_display.update_image_size()
+        if hasattr(self, 'detection_image_display'):
+            self.detection_image_display.update_image_size()
+        if hasattr(self, 'main_subject_display'):
+            self.main_subject_display.update_image_size()
+        if hasattr(self, 'depth_image_display'):
+            self.depth_image_display.update_image_size()
+        if hasattr(self, 'sharpness_image_display'):
+            self.sharpness_image_display.update_image_size()
+        if hasattr(self, 'composition_image_display'):
+            self.composition_image_display.update_image_size()
 
 
 if __name__ == "__main__":

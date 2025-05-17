@@ -7,7 +7,15 @@ import argparse
 import sys
 import matplotlib.patches as patches
 from matplotlib.colors import LinearSegmentedColormap
+import os
+# Thiết lập các biến môi trường trước khi import các module khác
+os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 
+# Sửa lỗi matplotlib warning khi chạy trong thread khác
+import matplotlib
+matplotlib.use('Agg')  # Sử dụng Agg backend thay vì interactive backend
+
+# Tiếp tục với các import khác...
 
 # Function to install required packages if not already installed
 def check_dependencies():
@@ -1621,6 +1629,52 @@ def visualize_sports_results(img_data, detections, depth_map, sports_analysis, a
             # Tạo hiển thị biểu cảm nâng cao
             face_emotion_viz = visualize_emotion_results(face_img, facial_analysis)
 
+    # Lưu các thành phần riêng biệt
+    # Depth map
+    plt.figure(figsize=(8, 6))
+    plt.imshow(depth_map, cmap='plasma')
+    plt.title("Depth Map")
+    plt.axis('off')
+    plt.tight_layout()
+    plt.savefig("depth_map.png", dpi=150)
+    plt.close()
+
+    # Detections
+    plt.figure(figsize=(8, 6))
+    plt.imshow(det_viz)
+    plt.title(f"Detections ({detections['athletes']} athletes)")
+    plt.axis('off')
+    plt.tight_layout()
+    plt.savefig("detections.png", dpi=150)
+    plt.close()
+
+    # Main subject highlight
+    plt.figure(figsize=(8, 6))
+    plt.imshow(main_highlight)
+    plt.title("Main Subject Highlight")
+    plt.axis('off')
+    plt.tight_layout()
+    plt.savefig("main_subject_highlight.png", dpi=150)
+    plt.close()
+
+    # Sharpness heatmap
+    plt.figure(figsize=(8, 6))
+    plt.imshow(sharpness_viz)
+    plt.title("Sharpness Heatmap")
+    plt.axis('off')
+    plt.tight_layout()
+    plt.savefig("sharpness_heatmap.png", dpi=150)
+    plt.close()
+
+    # Composition analysis
+    plt.figure(figsize=(8, 6))
+    plt.imshow(comp_viz)
+    plt.title("Composition Analysis")
+    plt.axis('off')
+    plt.tight_layout()
+    plt.savefig("composition_analysis.png", dpi=150)
+    plt.close()
+
     # Hiển thị với bố cục nâng cao
     fig = plt.figure(figsize=(18, 12))
 
@@ -1787,7 +1841,7 @@ def visualize_sports_results(img_data, detections, depth_map, sports_analysis, a
         f.write("\nAction Analysis:\n")
         f.write(
             f"- Equipment detected: {', '.join(action_analysis['equipment_types']) if action_analysis['equipment_types'] else 'None'}\n")
-        f.write(f"- Action level: {action_analysis['action_quality']} ({action_analysis['action_level']:.2f})\n")
+        f.write(f"- Action quality: {action_analysis['action_quality']} ({action_analysis['action_level']:.2f})\n")
 
         f.write("\nComposition Analysis:\n")
         f.write(f"- Framing quality: {composition_analysis['framing_quality']}\n")
