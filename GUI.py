@@ -1,7 +1,7 @@
 import sys
 import os
 import numpy as np
-
+from ML_1 import generate_sports_caption
 # Đặt biến môi trường trước khi import các thư viện khác
 os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 
@@ -583,6 +583,13 @@ class SportsAnalysisApp(QMainWindow):
         # Lưu kết quả
         self.analysis_results = result
 
+        # Tạo caption cho ảnh
+        caption = generate_sports_caption(result)
+        print(f"Generated caption: {caption}")
+
+        # Hiển thị caption ở statusBar
+        self.statusBar().showMessage(f"Analysis complete. Caption: {caption}")
+
         # Cập nhật UI với kết quả từng tab
         self.update_detection_tab(result)
         self.update_main_subject_tab(result)
@@ -739,11 +746,21 @@ class SportsAnalysisApp(QMainWindow):
 
     def update_stats_tab(self, result):
         """Cập nhật tab thống kê"""
-        html = "<style>body {font-size: 16px;} .section {margin-bottom: 20px;} .header {font-weight: bold; font-size: 18px; color: #2196F3; margin-bottom: 10px;} table {border-collapse: collapse; width: 100%;} th, td {padding: 8px; text-align: left;} th {background-color: #f2f2f2;}</style>"
+        html = "<style>body {font-size: 16px;} .section {margin-bottom: 20px;} .header {font-weight: bold; font-size: 18px; color: #2196F3; margin-bottom: 10px;} table {border-collapse: collapse;} </style>"
 
+        # Thêm phần caption (thêm vào đây)
+        if 'caption' in result:
+            html += "<div class='section'>"
+            html += "<div class='header'>Image Caption</div>"
+            html += f"<p style='font-size: 18px; padding: 15px; background-color: #f0f0f0; border-radius: 10px;'>{result['caption']}</p>"
+            html += "</div>"
+
+        # Tiếp tục code hiện tại...
         # Thông tin cơ bản
         html += "<div class='section'>"
         html += "<div class='header'>General Information</div>"
+
+        # [Code còn lại giữ nguyên]
 
         if 'composition_analysis' in result:
             comp = result['composition_analysis']
