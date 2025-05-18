@@ -740,8 +740,20 @@ class SportsAnalysisApp(QMainWindow):
             elif 'contextual_scores' in facial_analysis:
                 self.emotion_chart.update_chart(facial_analysis['contextual_scores'])
         else:
-            self.face_image.setText("No face detected")
-            self.emotion_label.setText("No emotion detected")
+            # Hiển thị lý do không phát hiện được khuôn mặt
+            reason = "Không phát hiện được khuôn mặt"
+
+            if facial_analysis and 'debug_info' in facial_analysis:
+                if 'reason' in facial_analysis['debug_info']:
+                    reason = facial_analysis['debug_info']['reason']
+
+            if facial_analysis and facial_analysis.get('too_low_confidence', False):
+                confidence = facial_analysis.get('face_confidence', 0.0)
+                self.face_image.setText(f"Không đủ tin cậy để phân tích\nĐộ tin cậy: {confidence:.2f}")
+            else:
+                self.face_image.setText(f"{reason}")
+
+            self.emotion_label.setText("Không thể phân tích cảm xúc")
             self.emotion_chart.update_chart({})
 
     def update_stats_tab(self, result):
