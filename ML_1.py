@@ -1149,7 +1149,8 @@ def analyze_sports_environment(img_data, depth_map=None):
     return env_results
 
 
-def detect_human_pose(img_data, conf_threshold=0.3):
+def detect_human_pose(img_data, conf_threshold=0.15, main_subject_box=None):
+    print("DEBUG - Bắt đầu phát hiện pose")
     """
     Sử dụng YOLOv8-Pose để phát hiện các keypoint trên cơ thể người
 
@@ -1177,7 +1178,7 @@ def detect_human_pose(img_data, conf_threshold=0.3):
     # Load model (chỉ tải một lần)
     if not hasattr(detect_human_pose, 'model'):
         print("Đang tải model YOLOv8-Pose...")
-        detect_human_pose.model = YOLO('yolov8n-pose.pt')  # model nhỏ
+        detect_human_pose.model = YOLO('yolov8x-pose-p6.pt')  # model nhỏ
         print("Đã tải model YOLOv8-Pose thành công")
 
     # Dự đoán trên ảnh
@@ -1220,6 +1221,8 @@ def detect_human_pose(img_data, conf_threshold=0.3):
                 if person_pose["keypoints"]:
                     pose_results["poses"].append(person_pose)
 
+
+    print(f"DEBUG - pose_results có số poses: {len(pose_results.get('poses', []))}")
     return pose_results
 
 
@@ -2211,10 +2214,14 @@ def visualize_emotion_results(face_img, emotion_analysis):
     return img_data
 
 
-
 def visualize_sports_results(img_data, detections, depth_map, sports_analysis, action_analysis, composition_analysis,
                              facial_analysis=None, caption=None):
     """Create sports-specific visualization with enhanced main subject highlighting, emotion analysis and caption"""
+    # Thêm debug để xác định ID của biến
+    print(f"DEBUG D - ID của sports_analysis trong visualize: {id(sports_analysis)}")
+    print(
+        f"DEBUG - sports_analysis keys trong visualize: {sports_analysis.keys() if isinstance(sports_analysis, dict) else type(sports_analysis)}")
+
     img = np.array(img_data['resized']).copy()
     height, width = img.shape[:2]
 
@@ -2391,135 +2398,249 @@ def visualize_sports_results(img_data, detections, depth_map, sports_analysis, a
             cv2.putText(sharpness_viz, f"Sharp: {sharpness:.2f}",
                         (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
+    # THÊM MỚI: Hiển thị keypoints từ pose estimation nếu có
+    pose_viz = img.copy()
+
+    # Kiểm tra xác thực cấu trúc dữ liệu pose_analysis
+    if 'pose_analysis' in sports_analysis and isinstance(sports_analysis['pose_analysis'], dict) and 'poses' in \
+            sports_analysis['pose_analysis']:
+        poses = sports_analysis['pose_analysis']['poses']
+
+        # THAY ĐỔI: Lọc chỉ lấy pose của main subject
+        main_subject_pose = None
+
+        # Nếu có thông tin main_person, tìm pose phù hợp nhất
+        if main_person is not None:
+            main_x1, main_y1, main_x2, main_y2 = main_person['box']
+            main_center_x = (main_x1 + main_x2) / 2
+            main_center_y = (main_y1 + main_y2) / 2
+
+            best_iou = 0
+            best_pose = None
+
+            for pose in poses:
+                if 'bbox' in pose and pose['bbox']:
+                    p_x1, p_y1, p_x2, p_y2 = pose['bbox']
+
+                    # Tính IoU (Intersection over Union)
+                    x_left = max(main_x1, p_x1)
+                    y_top = max(main_y1, p_y1)
+                    x_right = min(main_x2, p_x2)
+                    y_bottom = min(main_y2, p_y2)
+
+                    if x_right < x_left or y_bottom < y_top:
+                        continue
+
+                    intersection = (x_right - x_left) * (y_bottom - y_top)
+                    main_area = (main_x2 - main_x1) * (main_y2 - main_y1)
+                    pose_area = (p_x2 - p_x1) * (p_y2 - p_y1)
+                    union = main_area + pose_area - intersection
+
+                    iou = intersection / union if union > 0 else 0
+
+                    if iou > best_iou:
+                        best_iou = iou
+                        best_pose = pose
+
+            if best_iou > 0.3:  # Ngưỡng IoU để xác định đúng người
+                main_subject_pose = best_pose
+                print(f"Main subject box: {main_x1}, {main_y1}, {main_x2}, {main_y2}")
+                print(f"Best pose box match: {best_pose['bbox'] if best_pose else 'None'}")
+                print(f"Best IoU: {best_iou}")
+
+            if best_iou <= 0.3 and main_person:
+                # Phương pháp 2: Tìm pose gần nhất với tâm main_person
+                main_center_x = (main_x1 + main_x2) / 2
+                main_center_y = (main_y1 + main_y2) / 2
+
+                min_distance = float('inf')
+                for pose in poses:
+                    if 'bbox' in pose and pose['bbox']:
+                        p_x1, p_y1, p_x2, p_y2 = pose['bbox']
+                        p_center_x = (p_x1 + p_x2) / 2
+                        p_center_y = (p_y1 + p_y2) / 2
+
+                        distance = ((p_center_x - main_center_x) ** 2 + (p_center_y - main_center_y) ** 2) ** 0.5
+                        if distance < min_distance:
+                            min_distance = distance
+                            best_pose = pose
+
+                # Nếu tìm được pose với khoảng cách hợp lý
+                if min_distance < (width * 0.2):  # 20% chiều rộng hình
+                    main_subject_pose = best_pose
+
+        # Nếu không tìm thấy theo IoU, lấy người có bbox lớn nhất/ở giữa nhất
+        if main_subject_pose is None and poses:
+            largest_area = 0
+            center_pose = None
+
+            for pose in poses:
+                if 'bbox' in pose and pose['bbox']:
+                    p_x1, p_y1, p_x2, p_y2 = pose['bbox']
+                    area = (p_x2 - p_x1) * (p_y2 - p_y1)
+
+                    # Ưu tiên người ở giữa
+                    p_center_x = (p_x1 + p_x2) / 2
+                    p_center_y = (p_y1 + p_y2) / 2
+                    center_score = 1 - (abs(p_center_x - width / 2) / width + abs(p_center_y - height / 2) / height) / 2
+
+                    # Kết hợp diện tích và vị trí
+                    score = area * center_score
+
+                    if score > largest_area:
+                        largest_area = score
+                        center_pose = pose
+
+            main_subject_pose = center_pose
+
+        # Xử lý chỉ với main_subject_pose
+        if main_subject_pose:
+            poses = [main_subject_pose]  # Chỉ xử lý pose của main subject
+
+        # Định nghĩa các cặp keypoint để vẽ khung xương
+        skeleton = [
+            (5, 7), (7, 9),  # Left arm
+            (6, 8), (8, 10),  # Right arm
+            (5, 6),  # Shoulders
+            (5, 11), (6, 12),  # Body
+            (11, 13), (13, 15),  # Left leg
+            (12, 14), (14, 16),  # Right leg
+            (11, 12)  # Hips
+        ]
+
+        print(f"Số người được phát hiện pose: {len(poses)}")
+
+        for person in poses:
+            # Kiểm tra và debug thông tin keypoints
+            print(f"Số keypoints của người: {len(person['keypoints'])}")
+
+            # Tạo dict để lưu các keypoint theo id
+            keypoints = {kp['id']: (int(kp['x']), int(kp['y'])) for kp in person['keypoints']}
+
+            # Vẽ các keypoint
+            for kp in person['keypoints']:
+                if kp['confidence'] < 0.2:  # Bỏ qua các điểm có độ tin cậy quá thấp
+                    continue
+
+                x, y = int(kp['x']), int(kp['y'])
+
+                # Màu sắc cho các keypoint khác nhau
+                if kp['id'] <= 4:  # Vùng đầu
+                    color = (255, 0, 0)  # Xanh dương
+                elif 5 <= kp['id'] <= 10:  # Vùng tay
+                    color = (0, 255, 255)  # Vàng
+                else:  # Vùng chân
+                    color = (0, 255, 0)  # Xanh lá
+
+                # Vẽ điểm lớn hơn, với viền đen để dễ nhìn hơn
+                cv2.circle(pose_viz, (x, y), 7, (0, 0, 0), -1)  # Viền đen
+                cv2.circle(pose_viz, (x, y), 5, color, -1)  # Điểm màu
+
+                # TẮT hiển thị tên keypoint để tránh rối mắt
+                # Chỉ hiển thị confidence bên cạnh điểm
+                # if kp['confidence'] > 0.6:  # Chỉ hiển thị cho điểm có độ tin cậy cao
+                #     cv2.putText(pose_viz, f"{kp['confidence']:.2f}", (x+5, y),
+                #                 cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+
+            # Vẽ skeleton
+            for kp1_id, kp2_id in skeleton:
+                if kp1_id in keypoints and kp2_id in keypoints:
+                    pt1 = keypoints[kp1_id]
+                    pt2 = keypoints[kp2_id]
+
+                    # Kiểm tra khoảng cách để tránh vẽ các đường quá dài
+                    distance = np.sqrt(((pt1[0] - pt2[0]) ** 2) + ((pt1[1] - pt2[1]) ** 2))
+                    # Khoảng cách tối đa hợp lý giữa các keypoint (có thể điều chỉnh)
+                    max_distance = width * 0.5  # 50% chiều rộng ảnh
+
+                    if distance > max_distance:
+                        continue  # Bỏ qua các skeleton quá dài
+
+                    # Sử dụng màu khác nhau cho các phần khác nhau của cơ thể
+                    if (kp1_id <= 4 and kp2_id <= 4):  # Phần đầu
+                        line_color = (255, 0, 0)
+                    elif (5 <= kp1_id <= 10) or (5 <= kp2_id <= 10):  # Phần tay
+                        line_color = (0, 255, 255)
+                    else:  # Phần chân
+                        line_color = (0, 255, 0)
+
+                    # Vẽ đường với độ dày lớn hơn
+                    cv2.line(pose_viz, pt1, pt2, (0, 0, 0), 5)  # Đường viền đen
+                    cv2.line(pose_viz, pt1, pt2, line_color, 3)  # Đường màu
+    else:
+        print("Không tìm thấy dữ liệu pose_analysis hoặc cấu trúc dữ liệu không đúng")
+        print(
+            f"sports_analysis keys: {sports_analysis.keys() if isinstance(sports_analysis, dict) else type(sports_analysis)}")
+        if isinstance(sports_analysis, dict) and 'pose_analysis' in sports_analysis:
+            print(f"pose_analysis keys: {sports_analysis['pose_analysis'].keys()}")
+
     # Hiển thị biểu cảm khuôn mặt
-    def visualize_emotion_results(face_img, emotion_analysis):
-        """Tạo hiển thị chuyên nghiệp cho phân tích biểu cảm khuôn mặt"""
-        if face_img is None or emotion_analysis is None or not emotion_analysis.get('has_faces', False):
-            return None
-
-        # Đảm bảo kích thước hợp lý cho ảnh khuôn mặt
-        h, w = face_img.shape[:2]
-        display_width = 300
-        display_height = int((h / w) * display_width) if w > 0 else 300
-
-        # Điều chỉnh kích thước ảnh khuôn mặt cho phù hợp
-        face_display = cv2.resize(face_img, (display_width, display_height),
-                                  interpolation=cv2.INTER_AREA)
-
-        # Lấy thông tin cảm xúc
-        emotion = emotion_analysis.get('dominant_emotion', 'unknown')
-        intensity = emotion_analysis.get('emotion_intensity', 0)
-        original_emotion = emotion_analysis.get('original_emotion', emotion)
-
-        # Định nghĩa màu dựa trên loại cảm xúc (dạng RGB cho matplotlib)
-        emotion_colors = {
-            'happy': (0.0, 0.8, 0.2),  # Green
-            'happiness': (0.0, 0.8, 0.2),  # Green
-            'surprise': (1.0, 0.7, 0.0),  # Orange
-            'sad': (0.0, 0.0, 0.8),  # Blue
-            'sadness': (0.0, 0.0, 0.8),  # Blue
-            'angry': (0.8, 0.0, 0.0),  # Red
-            'anger': (0.8, 0.0, 0.0),  # Red
-            'fear': (0.8, 0.0, 0.8),  # Purple
-            'disgust': (0.5, 0.4, 0.0),  # Brown
-            'neutral': (0.5, 0.5, 0.5),  # Gray
-            'contempt': (0.6, 0.0, 0.6),  # Dark purple
-            'unknown': (0.7, 0.7, 0.7)  # Light Gray
-        }
-
-        # Màu dựa trên cảm xúc phát hiện được
-        color = emotion_colors.get(emotion.lower(), (0.7, 0.7, 0.7))
-
-        # Tạo figure để hiển thị với kích thước hợp lý
-        fig = plt.figure(figsize=(6, 8), dpi=100)
-
-        # Thêm tiêu đề với màu theo cảm xúc
-        emotion_title = f"Face: {emotion.upper()} ({intensity:.2f})"
-        if original_emotion != emotion and original_emotion != "unknown":
-            emotion_title += f"\nOriginal: {original_emotion.upper()}"
-
-        fig.suptitle(emotion_title, fontsize=16, color=color, fontweight='bold')
-
-        # Thiết lập layout - 2 dòng, 1 cột
-        gs = plt.GridSpec(2, 1, height_ratios=[3, 1], figure=fig)
-
-        # Hiển thị ảnh khuôn mặt
-        ax_face = fig.add_subplot(gs[0])
-        ax_face.imshow(face_display)
-
-        # Thêm viền màu xung quanh khuôn mặt
-        border_width = 5
-        for spine in ax_face.spines.values():
-            spine.set_linewidth(border_width)
-            spine.set_color(color)
-
-        ax_face.set_xticks([])
-        ax_face.set_yticks([])
-
-        # Thêm biểu đồ cảm xúc nếu có điểm số
-        scores = emotion_analysis.get('contextual_scores', emotion_analysis.get('emotion_scores', {}))
-        if scores:
-            ax_chart = fig.add_subplot(gs[1])
-
-            # Sắp xếp cảm xúc theo điểm số
-            emotions = sorted(scores.keys(), key=lambda x: scores[x], reverse=True)
-            values = [scores[e] for e in emotions]
-
-            # Rút ngắn tên cảm xúc để hiển thị gọn hơn
-            display_labels = [e[:3].upper() if len(e) > 3 else e.upper() for e in emotions]
-
-            # Tạo màu cho từng cảm xúc
-            bar_colors = [emotion_colors.get(e.lower(), (0.7, 0.7, 0.7)) for e in emotions]
-
-            # Vẽ biểu đồ thanh ngang để dễ đọc hơn
-            bars = ax_chart.barh(display_labels, values, color=bar_colors, alpha=0.7)
-
-            # Thêm giá trị lên mỗi thanh
-            for i, bar in enumerate(bars):
-                width = bar.get_width()
-                ax_chart.text(width + 0.01, bar.get_y() + bar.get_height() / 2,
-                              f'{width:.2f}', ha='left', va='center', fontweight='bold')
-
-            # Đặt giới hạn trục x từ 0 đến 1
-            ax_chart.set_xlim(0, 1.0)
-
-            # Tiêu đề nhỏ cho biểu đồ
-            ax_chart.set_title('Emotion Scores', fontsize=12)
-
-            # Thêm lưới để dễ đọc
-            ax_chart.grid(axis='x', linestyle='--', alpha=0.7)
-
-        plt.tight_layout()
-
-        # Chuyển đổi figure thành ảnh
-        fig.canvas.draw()
-        img_data = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
-        img_data = img_data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
-
-        # Đóng figure để tránh memory leak
-        plt.close(fig)
-
-        return img_data
-
-    # PHÂN TÍCH VÀ HIỂN THỊ BIỂU CẢM KHUÔN MẶT CẢI TIẾN
     face_emotion_viz = None
     if facial_analysis and facial_analysis.get('has_faces', False):
-        # Tìm ảnh khuôn mặt
-        face_img = None
         try:
-            if 'face_path' in facial_analysis:
-                face_img = cv2.imread(facial_analysis['face_path'])
-                face_img = cv2.cvtColor(face_img, cv2.COLOR_BGR2RGB)
-            else:
-                face_img = cv2.imread("face_debug/best_face.jpg")
-                face_img = cv2.cvtColor(face_img, cv2.COLOR_BGR2RGB)
-        except Exception as e:
-            print(f"Could not load face image: {str(e)}")
+            # Tìm ảnh khuôn mặt
             face_img = None
+            if 'face_path' in facial_analysis:
+                face_path = facial_analysis['face_path']
+                print(f"Đọc ảnh khuôn mặt từ: {face_path}")
+                if os.path.exists(face_path):
+                    face_img = cv2.imread(face_path)
+                    if face_img is not None:
+                        face_img = cv2.cvtColor(face_img, cv2.COLOR_BGR2RGB)
+                        print(f"Đã đọc ảnh khuôn mặt thành công, kích thước: {face_img.shape}")
+                    else:
+                        print(f"Không thể đọc ảnh khuôn mặt từ {face_path}")
 
-        if face_img is not None:
-            # Tạo hiển thị biểu cảm nâng cao
-            face_emotion_viz = visualize_emotion_results(face_img, facial_analysis)
+            # Nếu không có face_path hoặc không đọc được, thử tìm trực tiếp trong thư mục debug
+            if face_img is None:
+                fallback_path = "face_debug/best_face.jpg"
+                if os.path.exists(fallback_path):
+                    face_img = cv2.imread(fallback_path)
+                    if face_img is not None:
+                        face_img = cv2.cvtColor(face_img, cv2.COLOR_BGR2RGB)
+                        print(f"Đã đọc ảnh khuôn mặt từ đường dẫn dự phòng: {fallback_path}")
+                    else:
+                        print(f"Không thể đọc ảnh khuôn mặt từ đường dẫn dự phòng")
+                else:
+                    print(f"Không tìm thấy file ảnh khuôn mặt dự phòng: {fallback_path}")
+
+            # Nếu đọc được ảnh khuôn mặt, tạo hiển thị biểu cảm
+            if face_img is not None:
+                # Đảm bảo kích thước hợp lý cho ảnh khuôn mặt
+                h, w = face_img.shape[:2]
+                display_width = 300
+                display_height = int((h / w) * display_width) if w > 0 else 300
+
+                # Điều chỉnh kích thước ảnh khuôn mặt cho phù hợp
+                face_display = cv2.resize(face_img, (display_width, display_height),
+                                          interpolation=cv2.INTER_AREA)
+
+                # Lấy thông tin cảm xúc
+                emotion = facial_analysis.get('dominant_emotion', 'unknown')
+                intensity = facial_analysis.get('emotion_intensity', 0)
+
+                # Tạo hình ảnh hiển thị biểu cảm
+                face_emotion_viz = np.ones((400, 400, 3), dtype=np.uint8) * 255  # Tạo nền trắng
+
+                # Hiển thị ảnh khuôn mặt ở giữa
+                y_offset = 50
+                x_offset = (400 - display_width) // 2
+                face_emotion_viz[y_offset:y_offset + display_height, x_offset:x_offset + display_width] = face_display
+
+                # Hiển thị thông tin cảm xúc
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                cv2.putText(face_emotion_viz, f"Emotion: {emotion.upper()}", (20, 30),
+                            font, 0.7, (0, 0, 0), 2)
+                cv2.putText(face_emotion_viz, f"Intensity: {intensity:.2f}", (20, y_offset + display_height + 30),
+                            font, 0.7, (0, 0, 0), 2)
+
+                print(f"Đã tạo hiển thị biểu cảm khuôn mặt thành công")
+            else:
+                print("Không thể đọc ảnh khuôn mặt từ bất kỳ nguồn nào")
+        except Exception as e:
+            import traceback
+            print(f"Lỗi khi tạo hiển thị biểu cảm: {str(e)}")
+            print(traceback.format_exc())
 
     # Lưu các thành phần riêng biệt
     # Depth map
@@ -2567,11 +2688,20 @@ def visualize_sports_results(img_data, detections, depth_map, sports_analysis, a
     plt.savefig("composition_analysis.png", dpi=150)
     plt.close()
 
+    # THÊM MỚI: Lưu Pose Estimation
+    plt.figure(figsize=(8, 6))
+    plt.imshow(pose_viz)
+    plt.title("Pose Estimation")
+    plt.axis('off')
+    plt.tight_layout()
+    plt.savefig("pose_estimation.png", dpi=150)
+    plt.close()
+
     # Hiển thị với bố cục nâng cao
     fig = plt.figure(figsize=(18, 12))
 
-    # Định nghĩa lưới hiển thị với kích thước khác nhau
-    grid = plt.GridSpec(3, 4, hspace=0.3, wspace=0.3)
+    # THAY ĐỔI: Cập nhật GridSpec để thêm pose estimation
+    grid = plt.GridSpec(4, 4, hspace=0.3, wspace=0.3)
 
     # Ảnh gốc
     ax_orig = fig.add_subplot(grid[0, 0])
@@ -2609,9 +2739,15 @@ def visualize_sports_results(img_data, detections, depth_map, sports_analysis, a
     ax_sharp.set_title("Sharpness Heatmap")
     ax_sharp.axis('off')
 
+    # THÊM MỚI: Pose estimation visualization
+    ax_pose = fig.add_subplot(grid[2:4, 2:4])  # ĐIỀU CHỈNH VỊ TRÍ HIỂN THỊ POSE
+    ax_pose.imshow(pose_viz)
+    ax_pose.set_title("Pose Estimation")
+    ax_pose.axis('off')
+
     # Face analysis nâng cao
     if face_emotion_viz is not None:
-        ax_face = fig.add_subplot(grid[2, 2:4])
+        ax_face = fig.add_subplot(grid[3, 0:2])  # ĐIỀU CHỈNH VỊ TRÍ HIỂN THỊ FACE
         ax_face.imshow(face_emotion_viz)
 
         # Hiển thị tiêu đề chi tiết hơn
@@ -2628,7 +2764,7 @@ def visualize_sports_results(img_data, detections, depth_map, sports_analysis, a
         ax_face.axis('off')
     else:
         # Hiển thị thông báo rõ ràng khi không phát hiện được khuôn mặt
-        ax_info = fig.add_subplot(grid[2, 2:4])
+        ax_info = fig.add_subplot(grid[3, 0:2])  # ĐIỀU CHỈNH VỊ TRÍ HIỂN THỊ LỖI FACE
 
         # Tạo thông báo "No face detected"
         if not facial_analysis or not facial_analysis.get('has_faces', False):
@@ -2859,8 +2995,25 @@ def analyze_sports_image(file_path):
         traceback.print_exc()
         facial_analysis = {'has_faces': False, 'error': str(e)}
 
+    # Step 6.5: THÊM PHÁT HIỆN POSE
+    print("Detecting human poses...")
+    pose_results = detect_human_pose(img_data, conf_threshold=0.15)
+    # Cập nhật sports_analysis với pose_results
+    sports_analysis['pose_analysis'] = pose_results
+    print(f"DEBUG B - sports_analysis sau khi gán pose: {sports_analysis.keys()}")
+
+    # Tạo kết quả phân tích cuối cùng
+    analysis_result = {
+        'detections': detections,
+        'sports_analysis': sports_analysis,  # sports_analysis đã có pose_analysis
+        'action_analysis': action_analysis,
+        'composition_analysis': composition_analysis,
+        'facial_analysis': facial_analysis
+    }
+
     # Step 7: Visualize results với hiển thị biểu cảm cải tiến
     print("Visualizing results...")
+    print(f"DEBUG C - ID của sports_analysis trước khi visualize: {id(sports_analysis)}")
     visualize_sports_results(img_data, detections, depth_map,
                              sports_analysis, action_analysis, composition_analysis,
                              facial_analysis)
@@ -2869,24 +3022,11 @@ def analyze_sports_image(file_path):
     print(f"\nAnalysis completed in {t_end - t_start:.2f} seconds")
 
     # Tạo caption từ kết quả phân tích
-    analysis_result = {
-        'detections': detections,
-        'sports_analysis': sports_analysis,
-        'action_analysis': action_analysis,
-        'composition_analysis': composition_analysis,
-        'facial_analysis': facial_analysis
-    }
-
-    # Tạo caption
     caption = generate_sports_caption(analysis_result)
     print(f"\nCaption: {caption}")
 
     # Thêm caption vào kết quả trả về
     analysis_result['caption'] = caption
-
-    # Detect human poses with YOLOv8-Pose
-    pose_results = detect_human_pose(img_data)
-    results['pose_analysis'] = pose_results
 
     return analysis_result
 
