@@ -1,4 +1,9 @@
 import os
+import traceback
+
+import PIL.Image
+from ultralytics.engine import results
+
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 import torch, cv2, numpy as np, matplotlib.pyplot as plt
@@ -11,11 +16,121 @@ import sys
 import matplotlib.patches as patches
 from matplotlib.colors import LinearSegmentedColormap
 import math
-# Sửa lỗi matplotlib warning khi chạy trong thread khác
 import matplotlib
 matplotlib.use('Agg')  # Sử dụng Agg backend thay vì interactive backend
+# Thêm sau các import hiện có
+try:
+    import clip
+    import torch
+    CLIP_AVAILABLE = True
+    from ultralytics import YOLO
+    POSE_MODEL_AVAILABLE = True
+except ImportError:
+    CLIP_AVAILABLE = False
+    print("CLIP not available. To use precise ball detection, install with: pip install clip")
+    POSE_MODEL_AVAILABLE = False
+    print("YOLOv8-Pose không khả dụng. Cài đặt với: pip install ultralytics")
 
-# Tiếp tục với các import khác...
+
+# THÊM HÀM này vào ML_1.py, trước hàm analyze_sports_image
+def classify_sports_ball_with_clip(image, box, device=None):
+    """
+    Sử dụng CLIP để phân loại chính xác loại bóng từ vùng đã phát hiện là 'sports ball'
+
+    Args:
+        image: Ảnh numpy array (RGB)
+        box: [x1, y1, x2, y2] - Tọa độ bounding box của bóng
+        device: Thiết bị tính toán (cuda/cpu)
+
+    Returns:
+        String: Loại bóng cụ thể ("soccer ball", "basketball", ...)
+    """
+    if not CLIP_AVAILABLE:
+        return "sports ball"
+
+    # Xác định thiết bị nếu chưa được chỉ định
+    if device is None:
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    # Tải model CLIP (chỉ tải một lần)
+    if not hasattr(classify_sports_ball_with_clip, 'model'):
+        print("Đang tải model CLIP...")
+        classify_sports_ball_with_clip.model, classify_sports_ball_with_clip.preprocess = clip.load("ViT-B/32",
+                                                                                                    device=device)
+        print("Đã tải model CLIP thành công")
+
+    model = classify_sports_ball_with_clip.model
+    preprocess = classify_sports_ball_with_clip.preprocess
+
+    # Cắt vùng ảnh chứa bóng từ box
+    x1, y1, x2, y2 = [int(coord) for coord in box]
+    # Thêm padding nhỏ xung quanh để đảm bảo lấy toàn bộ bóng
+    padding = int(min(x2 - x1, y2 - y1) * 0.1)
+    x1 = max(0, x1 - padding)
+    y1 = max(0, y1 - padding)
+    x2 = min(image.shape[1], x2 + padding)
+    y2 = min(image.shape[0], y2 + padding)
+
+    ball_img = image[y1:y2, x1:x2]
+
+    # Chuyển thành định dạng PIL Image và tiền xử lý cho CLIP
+    try:
+        pil_img = PIL.Image.fromarray(ball_img.astype('uint8'))
+        processed_img = preprocess(pil_img).unsqueeze(0).to(device)
+    except Exception as e:
+        print(f"Lỗi khi xử lý ảnh bóng: {str(e)}")
+        return "sports ball"
+
+    # Danh sách các mô tả về loại bóng (kết hợp nhiều biến thể để tăng độ chính xác)
+    ball_descriptions = [
+        "a soccer ball", "a white and black soccer ball", "a football used in soccer games",
+        "a basketball", "an orange basketball with black lines", "a ball used in basketball",
+        "a tennis ball", "a yellow-green tennis ball", "a small fuzzy ball used in tennis",
+        "a volleyball", "a white volleyball with panels", "a ball used in volleyball games",
+        "a baseball", "a white baseball with red stitching", "a small hard ball used in baseball",
+        "a golf ball", "a small white golf ball with dimples", "a ball used in golf",
+        "a rugby ball", "an oval-shaped rugby ball", "a ball used in rugby"
+    ]
+
+    # Mã hóa các mô tả văn bản
+    text_inputs = clip.tokenize(ball_descriptions).to(device)
+
+    with torch.no_grad():
+        # Mã hóa hình ảnh
+        image_features = model.encode_image(processed_img)
+        # Mã hóa văn bản
+        text_features = model.encode_text(text_inputs)
+
+        # Tính toán độ tương đồng giữa hình ảnh và văn bản
+        image_features /= image_features.norm(dim=-1, keepdim=True)
+        text_features /= text_features.norm(dim=-1, keepdim=True)
+        similarity = (100.0 * image_features @ text_features.T).softmax(dim=-1)
+
+        # Tìm mô tả có độ tương đồng cao nhất
+        values, indices = similarity[0].topk(3)
+
+    # Chọn mô tả có độ tương đồng cao nhất
+    best_match_idx = indices[0].item()
+    best_match = ball_descriptions[best_match_idx]
+
+    # Map về tên chuẩn của loại bóng dựa trên mô tả tốt nhất
+    if "soccer" in best_match or "football" in best_match:
+        return "soccer ball"
+    elif "basketball" in best_match:
+        return "basketball"
+    elif "tennis" in best_match:
+        return "tennis ball"
+    elif "volleyball" in best_match:
+        return "volleyball"
+    elif "baseball" in best_match:
+        return "baseball"
+    elif "golf" in best_match:
+        return "golf ball"
+    elif "rugby" in best_match:
+        return "rugby ball"
+
+    # Nếu không chắc chắn, giữ nguyên nhãn gốc
+    return "sports ball"
 
 # DNN Face Detection Functions
 def detect_faces_improved(image):
@@ -331,8 +446,12 @@ def check_dependencies():
         'cv2': 'opencv-python',
         'numpy': 'numpy',
         'matplotlib': 'matplotlib',
+        'ultralytics': 'ultralytics',
         'scipy': 'scipy',
-        'PIL': 'pillow'
+        'PIL': 'pillow',
+        'clip': 'git+https://github.com/openai/CLIP.git',
+        'ftfy': 'ftfy',
+        'regex': 'regex'
     }
 
     missing_packages = []
@@ -455,6 +574,19 @@ def detect_sports_objects(yolo, img_data):
             detections['classes'].append(class_name)
             detections['scores'].append(conf)
 
+            # Sử dụng CLIP để phân loại chính xác loại bóng
+            if class_name == 'sports ball' and CLIP_AVAILABLE and conf > 0.4:
+                try:
+                    # Xác định loại bóng cụ thể bằng CLIP
+                    specific_ball = classify_sports_ball_with_clip(img_data['resized_array'], [x1, y1, x2, y2])
+                    print(f"CLIP phân loại: 'sports ball' -> '{specific_ball}'")
+
+                    # Cập nhật lại class_name với loại bóng xác định được
+                    class_name = specific_ball
+                    detections['classes'][-1] = class_name
+                except Exception as e:
+                    print(f"Lỗi khi phân loại bóng với CLIP: {str(e)}")
+
             if class_name == 'person':
                 detections['athletes'] += 1
             if class_name in sports_classes:
@@ -550,7 +682,7 @@ def analyze_sports_scene(detections, depth_map, img_data):
     """Analyze the sports scene based on detected objects and depth"""
     height, width = depth_map.shape[:2]
 
-    # Analyze player distribution
+    # Phần phân tích phân bố người chơi (giữ nguyên)
     player_positions = []
     for i, cls in enumerate(detections['classes']):
         if cls == 'person':
@@ -565,12 +697,9 @@ def analyze_sports_scene(detections, depth_map, img_data):
             center_y = (y1 + y2) / 2 / height
             player_positions.append((center_x, center_y))
 
-    # Initialize player_dispersion with default value
+    # Tính độ phân tán người chơi (giữ nguyên)
     player_dispersion = 0
-
-    # Calculate player dispersion (if multiple players)
     if len(player_positions) > 1:
-        # Calculate average pairwise distance
         total_distance = 0
         count = 0
         for i in range(len(player_positions)):
@@ -583,17 +712,26 @@ def analyze_sports_scene(detections, depth_map, img_data):
         if count > 0:
             player_dispersion = total_distance / count
 
-    # MỚI: Phân tích độ sắc nét của các đối tượng
+    # Phân tích độ sắc nét của các đối tượng (giữ nguyên)
     image = img_data['resized_array']
     sharpness_scores, sharpness_details = analyze_object_sharpness(image, detections['boxes'])
     print(f"Sharpness scores: {[f'{score:.2f}' for score in sharpness_scores]}")
 
-    # Identify key subjects (based on size and position)
+    # PHẦN CẢI TIẾN: Xác định đối tượng chính (key_subjects)
     key_subjects = []
+
+    # Tính kích thước tối thiểu (3% diện tích ảnh)
+    min_size_threshold = 0.03 * (img_data['resized_array'].shape[0] * img_data['resized_array'].shape[1])
+
+    # Trích xuất thông tin môn thể thao (nếu có)
+    sport_type = "unknown"
+    if 'composition_analysis' in img_data and 'sport_type' in img_data['composition_analysis']:
+        sport_type = img_data['composition_analysis']['sport_type'].lower()
+
     for i, box in enumerate(detections['boxes']):
         x1, y1, x2, y2 = box
         area = (x2 - x1) * (y2 - y1)
-        area_ratio = area / (img_data['resized_array'].shape[1] * img_data['resized_array'].shape[0])
+        area_ratio = area / (img_data['resized_array'].shape[0] * img_data['resized_array'].shape[1])
 
         # Scale coordinates to match depth map dimensions
         depth_x1 = int(x1 * depth_map.shape[1] / img_data['resized_array'].shape[1])
@@ -618,45 +756,108 @@ def analyze_sports_scene(detections, depth_map, img_data):
         # Lấy độ sắc nét
         sharpness = sharpness_scores[i] if i < len(sharpness_scores) else 0
 
+        # Tính vị trí trung tâm và khoảng cách đến trung tâm ảnh
+        center_x = (x1 + x2) / 2 / img_data['resized_array'].shape[1]
+        center_y = (y1 + y2) / 2 / img_data['resized_array'].shape[0]
+        center_dist = np.sqrt((center_x - 0.5) ** 2 + (center_y - 0.5) ** 2)
+
+        # Tạo thông tin đối tượng
         subject_info = {
             'class': detections['classes'][i],
             'box': box,
+            'area': area,
             'area_ratio': area_ratio,
             'depth': obj_depth,
-            'sharpness': sharpness,  # MỚI: Thêm độ sắc nét
+            'sharpness': sharpness,
             'sharpness_details': sharpness_details[i] if i < len(sharpness_details) else None,
-            # MỚI: Chi tiết độ sắc nét
-            'position': ((x1 + x2) / 2 / img_data['resized_array'].shape[1],
-                         (y1 + y2) / 2 / img_data['resized_array'].shape[0])
+            'position': (center_x, center_y),
+            'center_dist': center_dist
         }
 
-        # MỚI: Kết hợp vị trí, kích thước, độ sâu và độ sắc nét
-        center_dist = np.sqrt((subject_info['position'][0] - 0.5) ** 2 +
-                              (subject_info['position'][1] - 0.5) ** 2)
+        # CẢI TIẾN 1: Điều chỉnh tỷ trọng các yếu tố
+        # Kích thước và vị trí (60% thay vì 40%)
+        position_weight = 0.2  # Trọng số cho vị trí trung tâm
+        size_weight = 0.4  # Trọng số cho kích thước
 
-        # Tính toán vị trí và kích thước (40%)
-        position_size_score = area_ratio * (1 - min(1.0, center_dist))
+        # Giảm tỷ trọng độ sắc nét (20% thay vì 40%)
+        sharpness_weight = 0.2
 
-        # Độ sắc nét (40%)
-        sharpness_score = sharpness
+        # Giữ nguyên tỷ trọng độ sâu (20%)
+        depth_weight = 0.2
 
-        # Đối tượng gần hơn có điểm cao hơn (20%)
-        depth_score = 1 - obj_depth
+        # Tính điểm cho vị trí (càng gần trung tâm càng cao)
+        position_score = (1 - min(1.0, center_dist * 1.5)) * position_weight
 
-        # MỚI: Tổng hợp điểm số với trọng số
-        subject_info['prominence'] = position_size_score * 0.4 + sharpness_score * 0.4 + depth_score * 0.2
+        # Tính điểm cho kích thước
+        size_score = area_ratio * size_weight
+
+        # Tính điểm cho độ sắc nét
+        sharpness_score = sharpness * sharpness_weight
+
+        # Tính điểm cho độ sâu (đối tượng gần hơn có điểm cao hơn)
+        depth_score = (1 - obj_depth) * depth_weight
+
+        # CẢI TIẾN 2: Ưu tiên đối tượng người và kích thước lớn
+        class_multiplier = 1.0  # Mặc định
+
+        # Nếu là người, nhân hệ số lớn (3.5x)
+        if detections['classes'][i] == 'person':
+            class_multiplier *= 3.5
+
+        # Nếu kích thước đối tượng đủ lớn (>5% diện tích ảnh), thêm điểm
+        if area_ratio > 0.05:
+            class_multiplier *= 1.5
+
+        # Lọc kích thước tối thiểu (3% diện tích ảnh)
+        if area < min_size_threshold:
+            class_multiplier *= 0.5  # Giảm 50% điểm cho đối tượng quá nhỏ
+
+        # CẢI TIẾN 3: Logic đặc thù cho môn thể thao
+        sport_bonus = 1.0
+
+        # Đối với trượt tuyết, ưu tiên đối tượng ở phía trước/dưới (y lớn hơn)
+        if "ski" in sport_type or "snow" in sport_type:
+            # Đối tượng càng thấp (y lớn) càng có ưu thế
+            if center_y > 0.6:  # Nằm phía dưới ảnh
+                sport_bonus *= 1.3
+
+        # Tổng hợp điểm số với trọng số mới và các hệ số điều chỉnh
+        subject_info['prominence'] = (
+                                                 position_score + size_score + sharpness_score + depth_score) * class_multiplier * sport_bonus
+
+        # Lưu thông tin tính toán để debug
+        subject_info['debug'] = {
+            'position_score': position_score,
+            'size_score': size_score,
+            'sharpness_score': sharpness_score,
+            'depth_score': depth_score,
+            'class_multiplier': class_multiplier,
+            'sport_bonus': sport_bonus
+        }
 
         key_subjects.append(subject_info)
 
-    # Sort by prominence
+    # Sắp xếp theo prominence
     key_subjects.sort(key=lambda x: x['prominence'], reverse=True)
+
+    # In thông tin debug cho các đối tượng hàng đầu
+    if key_subjects:
+        print(f"\nĐối tượng chính: {key_subjects[0]['class']}, Prominence: {key_subjects[0]['prominence']:.3f}")
+        print(
+            f"Kích thước: {key_subjects[0]['area_ratio'] * 100:.1f}% ảnh, Độ sắc nét: {key_subjects[0]['sharpness']:.2f}")
+        print(f"Vị trí: {key_subjects[0]['position']}, Khoảng cách đến trung tâm: {key_subjects[0]['center_dist']:.2f}")
+
+        if len(key_subjects) > 1:
+            print(f"\nĐối tượng thứ 2: {key_subjects[1]['class']}, Prominence: {key_subjects[1]['prominence']:.3f}")
+            print(
+                f"Kích thước: {key_subjects[1]['area_ratio'] * 100:.1f}% ảnh, Độ sắc nét: {key_subjects[1]['sharpness']:.2f}")
 
     return {
         'player_count': detections['athletes'],
         'player_positions': player_positions,
         'player_dispersion': player_dispersion,
         'key_subjects': key_subjects[:5] if key_subjects else [],
-        'sharpness_scores': sharpness_scores  # MỚI: Lưu điểm số sắc nét
+        'sharpness_scores': sharpness_scores
     }
 
 
@@ -774,11 +975,266 @@ def verify_face(face_img):
         return False, f"Lỗi xác thực: {str(e)}"
 
 
+def analyze_sports_environment(img_data, depth_map=None):
+    """
+    Phân tích môi trường/bối cảnh thể thao dựa trên đặc điểm màu sắc, kết cấu và cấu trúc
+
+    Args:
+        img_data: Dict chứa ảnh gốc và ảnh đã resize
+        depth_map: Bản đồ độ sâu (nếu có)
+
+    Returns:
+        Dict: Thông tin về môi trường thể thao và xác suất từng môn
+    """
+    # Lấy ảnh đã resize để phân tích
+    image = img_data['resized_array']
+    height, width = image.shape[:2]
+
+    # Kết quả chứa xác suất các môn thể thao
+    env_results = {
+        'detected_environments': [],
+        'sport_probabilities': {},
+        'dominant_colors': [],
+        'surface_type': 'unknown',
+        'confidence': 0.0
+    }
+
+    # Phân tích màu sắc đặc trưng
+    # Chuyển sang không gian màu HSV để phân tích tốt hơn
+    hsv_img = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
+
+    # 1. Phát hiện màu sắc đặc trưng
+    # Tạo mask cho từng vùng màu quan trọng
+
+    # Xanh nước (bơi lội)
+    lower_blue = np.array([90, 50, 50])
+    upper_blue = np.array([130, 255, 255])
+    blue_mask = cv2.inRange(hsv_img, lower_blue, upper_blue)
+    blue_ratio = np.sum(blue_mask > 0) / (height * width)
+
+    # Xanh cỏ (sân cỏ - bóng đá, điền kinh)
+    lower_green = np.array([35, 50, 50])
+    upper_green = np.array([85, 255, 255])
+    green_mask = cv2.inRange(hsv_img, lower_green, upper_green)
+    green_ratio = np.sum(green_mask > 0) / (height * width)
+
+    # Đỏ/nâu (sân đất nện - tennis, điền kinh)
+    lower_red1 = np.array([0, 70, 50])
+    upper_red1 = np.array([10, 255, 255])
+    lower_red2 = np.array([170, 70, 50])
+    upper_red2 = np.array([180, 255, 255])
+    red_mask1 = cv2.inRange(hsv_img, lower_red1, upper_red1)
+    red_mask2 = cv2.inRange(hsv_img, lower_red2, upper_red2)
+    red_mask = red_mask1 | red_mask2
+    red_ratio = np.sum(red_mask > 0) / (height * width)
+
+    # Màu đen/xám đậm (đường chạy nhựa)
+    lower_dark = np.array([0, 0, 0])
+    upper_dark = np.array([180, 30, 80])
+    dark_mask = cv2.inRange(hsv_img, lower_dark, upper_dark)
+    dark_ratio = np.sum(dark_mask > 0) / (height * width)
+
+    # Màu trắng (sân võ thuật, sàn boxing)
+    lower_white = np.array([0, 0, 200])
+    upper_white = np.array([180, 30, 255])
+    white_mask = cv2.inRange(hsv_img, lower_white, upper_white)
+    white_ratio = np.sum(white_mask > 0) / (height * width)
+
+    # Lưu tỷ lệ màu chính
+    color_ratios = {
+        'blue': blue_ratio,
+        'green': green_ratio,
+        'red': red_ratio,
+        'dark': dark_ratio,
+        'white': white_ratio
+    }
+
+    # Lấy 2 màu chiếm tỷ lệ cao nhất
+    dominant_colors = sorted(color_ratios.items(), key=lambda x: x[1], reverse=True)[:2]
+    env_results['dominant_colors'] = dominant_colors
+
+    # 2. Phân tích kết cấu sân đấu
+
+    # Chuyển sang grayscale cho phân tích kết cấu
+    gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+
+    # Phát hiện cạnh với Canny
+    edges = cv2.Canny(gray, 50, 150)
+
+    # Phát hiện đường thẳng với Hough Transform
+    lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=100, minLineLength=100, maxLineGap=10)
+
+    # Đếm số đường thẳng ngang và dọc
+    horizontal_lines = 0
+    vertical_lines = 0
+
+    if lines is not None:
+        for line in lines:
+            x1, y1, x2, y2 = line[0]
+            # Tính góc của đường
+            angle = np.abs(np.arctan2(y2 - y1, x2 - x1) * 180 / np.pi)
+
+            # Phân loại dựa trên góc
+            if angle < 30 or angle > 150:
+                horizontal_lines += 1
+            elif angle > 60 and angle < 120:
+                vertical_lines += 1
+
+    # 3. Suy đoán môi trường thể thao dựa trên các đặc điểm
+    sport_probs = {}
+
+    # Bơi lội
+    if blue_ratio > 0.3 and horizontal_lines >= 3:
+        sport_probs['Swimming'] = min(1.0, blue_ratio * 1.5)
+        env_results['detected_environments'].append('swimming pool')
+        env_results['surface_type'] = 'water'
+
+    # Sân cỏ (bóng đá, rugby)
+    if green_ratio > 0.4:
+        sport_probs['Soccer'] = min(1.0, green_ratio * 1.2)
+        sport_probs['Rugby'] = min(1.0, green_ratio * 1.0)
+        env_results['detected_environments'].append('grass field')
+        env_results['surface_type'] = 'grass'
+
+    # Sân tennis đất nện
+    if red_ratio > 0.3 and horizontal_lines >= 2 and vertical_lines >= 2:
+        sport_probs['Tennis'] = min(1.0, red_ratio * 1.3)
+        env_results['detected_environments'].append('clay court')
+        env_results['surface_type'] = 'clay'
+
+    # Đường chạy điền kinh
+    if dark_ratio > 0.2 and horizontal_lines >= 3 and vertical_lines <= 2:
+        sport_probs['Track and Field'] = min(1.0, dark_ratio * 1.2)
+        sport_probs['Running'] = min(1.0, dark_ratio * 1.3)
+        env_results['detected_environments'].append('running track')
+        env_results['surface_type'] = 'track'
+
+    # Sàn đấu Boxing/UFC/võ thuật
+    if white_ratio > 0.3 and dark_ratio < 0.3:
+        if horizontal_lines <= 3 and vertical_lines <= 3:
+            env_canvas_ratio = 0.0
+            if depth_map is not None:
+                # Dùng depth map để xác định phần sàn đấu được nâng cao
+                # Đây là logic đơn giản, có thể cải tiến thêm
+                center_depth = depth_map[height // 3:2 * height // 3, width // 3:2 * width // 3]
+                border_depth = np.concatenate([
+                    depth_map[:height // 3, :],  # Trên
+                    depth_map[2 * height // 3:, :],  # Dưới
+                    depth_map[height // 3:2 * height // 3, :width // 3],  # Trái
+                    depth_map[height // 3:2 * height // 3, 2 * width // 3:]  # Phải
+                ])
+
+                if np.mean(center_depth) < np.mean(border_depth):
+                    env_canvas_ratio = 0.3
+
+            sport_probs['Boxing'] = min(1.0, white_ratio * 0.8 + env_canvas_ratio)
+            sport_probs['Martial Arts'] = min(1.0, white_ratio * 0.7 + env_canvas_ratio)
+            env_results['detected_environments'].append('fighting ring/mat')
+            env_results['surface_type'] = 'canvas'
+
+    # Sân bóng rổ
+    if (dark_ratio > 0.2 or red_ratio > 0.2) and horizontal_lines >= 2 and vertical_lines >= 2:
+        court_prob = max(dark_ratio, red_ratio) * 0.8
+        sport_probs['Basketball'] = min(1.0, court_prob)
+        env_results['detected_environments'].append('basketball court')
+        env_results['surface_type'] = 'court'
+
+    env_results['sport_probabilities'] = sport_probs
+
+    # Tính mức độ tin cậy tổng thể
+    if sport_probs:
+        max_prob = max(sport_probs.values())
+        env_results['confidence'] = max_prob
+
+    return env_results
+
+
+def detect_human_pose(img_data, conf_threshold=0.3):
+    """
+    Sử dụng YOLOv8-Pose để phát hiện các keypoint trên cơ thể người
+
+    Args:
+        img_data: Dict chứa ảnh gốc và ảnh đã resize
+        conf_threshold: Ngưỡng confidence cho việc phát hiện
+
+    Returns:
+        Dict: Thông tin về pose các người được phát hiện
+    """
+    if not POSE_MODEL_AVAILABLE:
+        return {"poses": []}
+
+    # Tạo cấu trúc kết quả
+    pose_results = {
+        "poses": [],
+        "keypoint_names": {
+            0: "nose", 1: "left_eye", 2: "right_eye", 3: "left_ear", 4: "right_ear",
+            5: "left_shoulder", 6: "right_shoulder", 7: "left_elbow", 8: "right_elbow",
+            9: "left_wrist", 10: "right_wrist", 11: "left_hip", 12: "right_hip",
+            13: "left_knee", 14: "right_knee", 15: "left_ankle", 16: "right_ankle"
+        }
+    }
+
+    # Load model (chỉ tải một lần)
+    if not hasattr(detect_human_pose, 'model'):
+        print("Đang tải model YOLOv8-Pose...")
+        detect_human_pose.model = YOLO('yolov8n-pose.pt')  # model nhỏ
+        print("Đã tải model YOLOv8-Pose thành công")
+
+    # Dự đoán trên ảnh
+    results = detect_human_pose.model(img_data['resized_array'])
+
+    # Chỉ lấy kết quả đầu tiên
+    for result in results:
+        if hasattr(result, 'keypoints') and result.keypoints is not None:
+            keypoints = result.keypoints.data
+            for person_id, person_keypoints in enumerate(keypoints):
+                # Tạo dict chứa thông tin pose của mỗi người
+                person_pose = {
+                    "person_id": person_id,
+                    "keypoints": [],
+                    "bbox": None
+                }
+
+                # Lấy keypoint và confidence
+                for kp_id, kp in enumerate(person_keypoints):
+                    x, y, conf = kp.tolist()
+                    if conf >= conf_threshold:
+                        person_pose["keypoints"].append({
+                            "id": kp_id,
+                            "name": pose_results["keypoint_names"].get(kp_id, f"kp_{kp_id}"),
+                            "x": float(x),
+                            "y": float(y),
+                            "confidence": float(conf)
+                        })
+
+                # Tính bounding box từ keypoints
+                if person_pose["keypoints"]:
+                    kp_coords = [(kp["x"], kp["y"]) for kp in person_pose["keypoints"]]
+                    x_min = min([x for x, _ in kp_coords])
+                    y_min = min([y for _, y in kp_coords])
+                    x_max = max([x for x, _ in kp_coords])
+                    y_max = max([y for _, y in kp_coords])
+                    person_pose["bbox"] = [x_min, y_min, x_max, y_max]
+
+                # Thêm vào kết quả
+                if person_pose["keypoints"]:
+                    pose_results["poses"].append(person_pose)
+
+    return pose_results
+
+
 def analyze_sports_composition(detections, analysis, img_data):
     """Analyze the composition with sports-specific context"""
 
     # Basic composition from existing analysis
     composition = analysis["composition_analysis"] if "composition_analysis" in analysis else {}
+
+    # Phân tích môi trường thể thao
+    depth_map = None
+    if 'depth_map' in analysis:
+        depth_map = analysis['depth_map']
+
+    env_analysis = analyze_sports_environment(img_data, depth_map)
 
     # Sports specific enhancements
     result = {
@@ -793,8 +1249,14 @@ def analyze_sports_composition(detections, analysis, img_data):
         'tennis racket': 'Tennis',
         'tennis ball': 'Tennis',
         'sports ball': 'Ball Sport',
+        'soccer ball': 'Soccer',  # Thêm
+        'basketball': 'Basketball',  # Thêm
+        'volleyball': 'Volleyball',  # Thêm
+        'baseball': 'Baseball',  # Thêm
         'baseball bat': 'Baseball',
         'baseball glove': 'Baseball',
+        'golf ball': 'Golf',  # Thêm
+        'rugby ball': 'Rugby',  # Thêm
         'skateboard': 'Skateboarding',
         'surfboard': 'Surfing',
         'frisbee': 'Frisbee',
@@ -802,10 +1264,37 @@ def analyze_sports_composition(detections, analysis, img_data):
         'snowboard': 'Snowboarding'
     }
 
+    # Cập nhật kết quả dựa trên môi trường
+    detected_sport_from_env = None
+    env_confidence = 0.0
+
+    # Lấy môn thể thao có xác suất cao nhất từ phân tích môi trường
+    if env_analysis['sport_probabilities']:
+        env_sport, env_prob = max(env_analysis['sport_probabilities'].items(), key=lambda x: x[1])
+        if env_prob > 0.8:  # Tăng ngưỡng tin cậy từ 0.5 lên 0.8 để giảm lỗi phân loại
+            detected_sport_from_env = env_sport
+            env_confidence = env_prob
+            print(f"Phát hiện môn thể thao từ môi trường: {env_sport} (độ tin cậy: {env_prob:.2f})")
+        else:
+            print(f"Độ tin cậy phân tích môi trường quá thấp ({env_prob:.2f} < 0.8), bỏ qua kết quả: {env_sport}")
+
+    detected_sport = None
+    equipment_confidence = 0.0
+
     for cls in detections['classes']:
         if cls in sport_equipment:
-            result['sport_type'] = sport_equipment[cls]
+            detected_sport = sport_equipment[cls]
+            equipment_confidence = 0.7  # Độ tin cậy khi phát hiện từ dụng cụ
             break
+
+    # Quyết định cuối cùng về môn thể thao
+    if detected_sport and equipment_confidence > env_confidence:
+        result['sport_type'] = detected_sport
+    elif detected_sport_from_env:
+        result['sport_type'] = detected_sport_from_env
+
+    # Lưu thông tin phân tích môi trường
+    result['environment_analysis'] = env_analysis
 
     # Evaluate framing quality for sports action
     if "key_subjects" in analysis and analysis['key_subjects']:
@@ -1097,6 +1586,7 @@ def analyze_facial_expression_advanced(detections, img_data, depth_map=None, spo
             emotion_scores_dict = {emotion: float(prob) for emotion, prob in zip(emotions, probabilities)}
             # Thêm contempt cho tương thích với code gốc
             emotion_scores_dict['contempt'] = 0.01
+            emotion_scores_dict['focus'] = 0.01
 
             # Xác định cảm xúc chính
             dominant_emotion = max(emotion_scores_dict, key=emotion_scores_dict.get)
@@ -1263,7 +1753,8 @@ def analyze_facial_expression_advanced(detections, img_data, depth_map=None, spo
                     'angry': 0.1,
                     'fear': 0.1,
                     'disgust': 0.1,
-                    'contempt': 0.1
+                    'contempt': 0.1,
+                    'focus': 0.10  # Thêm cảm xúc focus
                 }
 
                 # Phân tích đặc trưng LBP
@@ -1407,7 +1898,8 @@ def analyze_facial_expression_advanced(detections, img_data, depth_map=None, spo
                     'sad': 0.10,
                     'angry': 0.10,
                     'fear': 0.10,
-                    'disgust': 0.10
+                    'disgust': 0.10,
+                    'focus': 0.10
                 }
 
                 # Phân tích độ sáng & tương phản
@@ -1506,6 +1998,40 @@ def analyze_facial_expression_advanced(detections, img_data, depth_map=None, spo
                 if determination_score > max([v for k, v in contextual_emotions.items() if k != 'determination']):
                     dominant_emotion = 'determination'
                     print("Changed main emotion to 'determination' based on track sports context")
+
+        # Chuyển đổi "neutral" thành "focus" trong bối cảnh thể thao
+        if dominant_emotion == 'neutral' and emotion_intensity > 0.5:
+            # Xem xét các điều kiện để xác định có phải đang tập trung hay không
+            is_focus = False
+
+            # Điều kiện 1: Đang trong môi trường thể thao và có mức độ hành động cao
+            if action_level > 0.5:
+                is_focus = True
+
+            # Điều kiện 2: Trong môn thể thao đồng đội hoặc với bóng
+            if sport_type in team_sports or "ball" in str(sport_type).lower():
+                is_focus = True
+
+            # Điều kiện 3: Kiểm tra cường độ cảm xúc và độ tin cậy
+            if emotion_intensity > 0.7:
+                is_focus = True
+
+            # Nếu thỏa mãn điều kiện, thay đổi neutral thành focus
+            if is_focus:
+                dominant_emotion = 'focus'
+                print("Changed 'neutral' to 'focus' based on sports context")
+
+                # Cập nhật điểm số cảm xúc
+                if 'neutral' in contextual_emotions:
+                    contextual_emotions['focus'] = contextual_emotions.pop('neutral', dominant_score)
+                else:
+                    contextual_emotions['focus'] = dominant_score
+
+                # Cũng cập nhật trong emotion_scores_dict gốc nếu cần
+                if 'neutral' in emotion_scores_dict:
+                    emotion_scores_dict['focus'] = emotion_scores_dict.pop('neutral', dominant_score)
+                else:
+                    emotion_scores_dict['focus'] = dominant_score
 
         # 7. PHÂN TÍCH MỨC ĐỘ CẢM XÚC
         emotional_value = 'Moderate'
@@ -2155,6 +2681,17 @@ def visualize_sports_results(img_data, detections, depth_map, sports_analysis, a
     if "sport_type" in composition_analysis:
         print(f"\nSport type: {composition_analysis['sport_type']}")
 
+        # Thêm thông tin về môi trường nếu có
+        if 'environment_analysis' in composition_analysis:
+            env = composition_analysis['environment_analysis']
+            if env['detected_environments']:
+                print(f"Detected environment: {', '.join(env['detected_environments'])}")
+            if env['surface_type'] != 'unknown':
+                print(f"Surface type: {env['surface_type']}")
+            if env['dominant_colors']:
+                colors = [f"{color} ({ratio:.2f})" for color, ratio in env['dominant_colors']]
+                print(f"Dominant colors: {', '.join(colors)}")
+
     if detections['athletes'] > 0:
         print("\nPlayer Analysis:")
         print(f"- Number of players: {detections['athletes']}")
@@ -2346,6 +2883,10 @@ def analyze_sports_image(file_path):
 
     # Thêm caption vào kết quả trả về
     analysis_result['caption'] = caption
+
+    # Detect human poses with YOLOv8-Pose
+    pose_results = detect_human_pose(img_data)
+    results['pose_analysis'] = pose_results
 
     return analysis_result
 
