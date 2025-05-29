@@ -32,7 +32,6 @@ except ImportError:
     print("YOLOv8-Pose không khả dụng. Cài đặt với: pip install ultralytics")
 
 
-# THÊM HÀM này vào ML_1.py, trước hàm analyze_sports_image
 def classify_sports_ball_with_clip(image, box, device=None):
     """
     Sử dụng CLIP để phân loại chính xác loại bóng từ vùng đã phát hiện là 'sports ball'
@@ -132,7 +131,7 @@ def classify_sports_ball_with_clip(image, box, device=None):
     # Nếu không chắc chắn, giữ nguyên nhãn gốc
     return "sports ball"
 
-# DNN Face Detection Functions
+
 def detect_faces_improved(image):
     """
     Phát hiện khuôn mặt với DNN model - cải thiện cho nhiều loại da và góc quay
@@ -436,6 +435,7 @@ def select_best_face(faces, image):
 
     return best_face
 
+
 def check_dependencies():
     required_packages = {
         'ultralytics': 'ultralytics',
@@ -485,7 +485,6 @@ def check_dependencies():
     print("All dependencies checked and installed.")
 
 
-# Setup device and load models
 def load_models():
     try:
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -680,7 +679,7 @@ def analyze_object_sharpness(image, boxes):
     return sharpness_scores, sharpness_details
 
 
-def analyze_sports_scene(detections, depth_map, img_data):
+def analyze_sports_scene(detections, depth_map, img_data, yolo_seg=None):
     """Analyze the sports scene based on detected objects and depth"""
     height, width = depth_map.shape[:2]
 
@@ -854,13 +853,29 @@ def analyze_sports_scene(detections, depth_map, img_data):
             print(
                 f"Kích thước: {key_subjects[1]['area_ratio'] * 100:.1f}% ảnh, Độ sắc nét: {key_subjects[1]['sharpness']:.2f}")
 
-    return {
+    # Tạo biến sports_analysis
+    sports_analysis = {
         'player_count': detections['athletes'],
         'player_positions': player_positions,
         'player_dispersion': player_dispersion,
         'key_subjects': key_subjects[:5] if key_subjects else [],
         'sharpness_scores': sharpness_scores
     }
+
+    # Phân đoạn main subject nếu tìm thấy và là người
+    if key_subjects and key_subjects[0]['class'] == 'person':
+        main_subject_box = key_subjects[0]['box']
+        print("Thực hiện phân đoạn main subject...")
+        main_subject_mask = segment_main_subject(img_data['resized_array'], yolo_seg, main_subject_box)
+        if main_subject_mask is not None:
+            print(f"Đã tìm thấy mask cho main subject, kích thước: {main_subject_mask.shape}")
+        else:
+            print("Không tìm được mask phù hợp cho main subject")
+
+        # Lưu mask vào kết quả phân tích
+        sports_analysis['main_subject_mask'] = main_subject_mask
+
+    return sports_analysis
 
 
 def analyze_action_quality(detections, img_data):
@@ -975,6 +990,333 @@ def verify_face(face_img):
 
     except Exception as e:
         return False, f"Lỗi xác thực: {str(e)}"
+
+
+def calculate_angle(a, b, c):
+    """
+    Tính góc giữa ba điểm, với b là đỉnh của góc.
+    a, b, c mỗi điểm là tuple (x, y)
+    Trả về góc tính theo độ (0-180).
+    """
+    ba = np.array([a[0] - b[0], a[1] - b[1]])
+    bc = np.array([c[0] - b[0], c[1] - b[1]])
+
+    cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc))
+    angle = np.arccos(np.clip(cosine_angle, -1.0, 1.0))
+
+    return np.degrees(angle)
+
+
+def analyze_pose_data(pose):
+    """
+    Phân tích chi tiết dữ liệu pose để trích xuất các thông tin về tư thế.
+
+    Args:
+        pose: Dictionary chứa thông tin về keypoints
+
+    Returns:
+        Dictionary chứa các phân tích về tư thế
+    """
+    if not pose or 'keypoints' not in pose or not pose['keypoints']:
+        return {}
+
+    keypoints = pose['keypoints']
+
+    # Tạo dictionary để truy cập keypoints theo tên dễ dàng hơn
+    kp_dict = {}
+    kp_names = ["nose", "left_eye", "right_eye", "left_ear", "right_ear",
+                "left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
+                "left_wrist", "right_wrist", "left_hip", "right_hip",
+                "left_knee", "right_knee", "left_ankle", "right_ankle"]
+
+    for idx, name in enumerate(kp_names):
+        if idx < len(keypoints):
+            kp = keypoints[idx]
+            if kp['confidence'] >= 0.2:  # Chỉ lấy những keypoint có độ tin cậy cao
+                kp_dict[name] = (kp['x'], kp['y'])
+
+    # Dictionary chứa kết quả phân tích
+    analysis = {
+        'angles': {},
+        'ratios': {},
+        'posture': {},
+        'detected_keypoints': list(kp_dict.keys()),
+        'confidence': {}
+    }
+
+    # Tính các góc chính
+    # 1. Góc khuỷu tay
+    if all(k in kp_dict for k in ['left_shoulder', 'left_elbow', 'left_wrist']):
+        analysis['angles']['left_elbow'] = calculate_angle(
+            kp_dict['left_shoulder'], kp_dict['left_elbow'], kp_dict['left_wrist']
+        )
+
+    if all(k in kp_dict for k in ['right_shoulder', 'right_elbow', 'right_wrist']):
+        analysis['angles']['right_elbow'] = calculate_angle(
+            kp_dict['right_shoulder'], kp_dict['right_elbow'], kp_dict['right_wrist']
+        )
+
+    # 2. Góc đầu gối
+    if all(k in kp_dict for k in ['left_hip', 'left_knee', 'left_ankle']):
+        analysis['angles']['left_knee'] = calculate_angle(
+            kp_dict['left_hip'], kp_dict['left_knee'], kp_dict['left_ankle']
+        )
+
+    if all(k in kp_dict for k in ['right_hip', 'right_knee', 'right_ankle']):
+        analysis['angles']['right_knee'] = calculate_angle(
+            kp_dict['right_hip'], kp_dict['right_knee'], kp_dict['right_ankle']
+        )
+
+    # 3. Góc hông
+    if all(k in kp_dict for k in ['left_shoulder', 'left_hip', 'left_knee']):
+        analysis['angles']['left_hip'] = calculate_angle(
+            kp_dict['left_shoulder'], kp_dict['left_hip'], kp_dict['left_knee']
+        )
+
+    if all(k in kp_dict for k in ['right_shoulder', 'right_hip', 'right_knee']):
+        analysis['angles']['right_hip'] = calculate_angle(
+            kp_dict['right_shoulder'], kp_dict['right_hip'], kp_dict['right_knee']
+        )
+
+    # 4. Góc vai
+    if all(k in kp_dict for k in ['left_elbow', 'left_shoulder', 'right_shoulder']):
+        analysis['angles']['left_shoulder'] = calculate_angle(
+            kp_dict['left_elbow'], kp_dict['left_shoulder'], kp_dict['right_shoulder']
+        )
+
+    if all(k in kp_dict for k in ['right_elbow', 'right_shoulder', 'left_shoulder']):
+        analysis['angles']['right_shoulder'] = calculate_angle(
+            kp_dict['right_elbow'], kp_dict['right_shoulder'], kp_dict['left_shoulder']
+        )
+
+    # Tỷ lệ chiều dài các phần của cơ thể
+    if all(k in kp_dict for k in ['left_shoulder', 'left_hip']):
+        torso_length = np.sqrt((kp_dict['left_shoulder'][0] - kp_dict['left_hip'][0]) ** 2 +
+                               (kp_dict['left_shoulder'][1] - kp_dict['left_hip'][1]) ** 2)
+        analysis['ratios']['torso_length'] = torso_length
+
+    # Phân tích tư thế
+    if 'left_knee' in analysis['angles'] and 'right_knee' in analysis['angles']:
+        knee_avg = (analysis['angles']['left_knee'] + analysis['angles']['right_knee']) / 2
+        analysis['posture']['knee_bend'] = 'strong' if knee_avg < 120 else 'moderate' if knee_avg < 160 else 'slight'
+
+    if 'left_hip' in analysis['angles'] and 'right_hip' in analysis['angles']:
+        hip_avg = (analysis['angles']['left_hip'] + analysis['angles']['right_hip']) / 2
+        analysis['posture']['hip_bend'] = 'forward' if hip_avg < 150 else 'upright'
+
+    # Tính độ tin cậy trung bình cho các nhóm keypoints
+    conf_upper_body = [kp['confidence'] for kp in keypoints[:11] if kp['confidence'] >= 0.2]
+    conf_lower_body = [kp['confidence'] for kp in keypoints[11:] if kp['confidence'] >= 0.2]
+
+    if conf_upper_body:
+        analysis['confidence']['upper_body'] = sum(conf_upper_body) / len(conf_upper_body)
+    if conf_lower_body:
+        analysis['confidence']['lower_body'] = sum(conf_lower_body) / len(conf_lower_body)
+
+    return analysis
+
+
+def identify_sport_from_pose(pose_analysis, detections):
+    """
+    Xác định môn thể thao dựa trên phân tích tư thế và các đối tượng được phát hiện.
+
+    Args:
+        pose_analysis: Kết quả từ analyze_pose_data
+        detections: Dictionary chứa các đối tượng được phát hiện trong ảnh
+
+    Returns:
+        Dictionary với thông tin về môn thể thao được xác định và độ tin cậy
+    """
+    if not pose_analysis or not pose_analysis.get('angles'):
+        return {'sport': 'unknown', 'confidence': 0.0}
+
+    # Khởi tạo danh sách môn thể thao với điểm ban đầu
+    sports_scores = {
+        'running': 0.0,
+        'basketball': 0.0,
+        'soccer': 0.0,
+        'swimming': 0.0,
+        'baseball': 0.0,
+        'tennis': 0.0,
+        'volleyball': 0.0,
+        'martial_arts': 0.0,
+        'gymnastics': 0.0
+    }
+
+    angles = pose_analysis.get('angles', {})
+    posture = pose_analysis.get('posture', {})
+
+    # Phân tích theo tư thế
+
+    # Chạy bộ: Góc đầu gối gập, tay ở góc ~90 độ, thân người hơi nghiêng về phía trước
+    if 'left_knee' in angles and 'right_knee' in angles:
+        knee_avg = (angles['left_knee'] + angles['right_knee']) / 2
+        if 110 < knee_avg < 170:  # Góc đầu gối phổ biến khi chạy
+            sports_scores['running'] += 2.0
+
+    if 'left_elbow' in angles and 'right_elbow' in angles:
+        elbow_avg = (angles['left_elbow'] + angles['right_elbow']) / 2
+        if 70 < elbow_avg < 110:  # Góc khuỷu tay ~90 độ khi chạy
+            sports_scores['running'] += 1.5
+
+    # Bóng rổ: Kiểm tra các tư thế đặc trưng và có bóng
+    basketball_detected = 'sports ball' in detections and detections['sports ball'] > 0
+    if basketball_detected:
+        sports_scores['basketball'] += 2.0
+
+    if 'left_elbow' in angles and angles['left_elbow'] < 90:  # Tư thế ném bóng
+        sports_scores['basketball'] += 1.0
+        sports_scores['baseball'] += 0.8
+        sports_scores['volleyball'] += 0.7
+
+    # Bóng đá: Tư thế chân và có bóng
+    soccer_ball_detected = 'sports ball' in detections and detections['sports ball'] > 0
+    if soccer_ball_detected:
+        sports_scores['soccer'] += 2.0
+
+    if 'left_knee' in angles and angles['left_knee'] < 100:  # Tư thế đá bóng
+        sports_scores['soccer'] += 1.5
+
+    # Tennis: Tư thế tay cầm vợt
+    tennis_racket_detected = 'tennis racket' in detections and detections['tennis racket'] > 0
+    if tennis_racket_detected:
+        sports_scores['tennis'] += 3.0
+
+    # Võ thuật: Tư thế tấn
+    if 'left_knee' in angles and 'right_knee' in angles:
+        if angles['left_knee'] < 100 and angles['right_knee'] < 100:
+            sports_scores['martial_arts'] += 2.0
+
+    # Thể dục dụng cụ: Tư thế duỗi tay, chân
+    if 'left_knee' in angles and angles['left_knee'] > 160:
+        if 'right_knee' in angles and angles['right_knee'] > 160:
+            sports_scores['gymnastics'] += 1.0
+
+    # Điều chỉnh dựa trên các đối tượng được phát hiện
+    if 'baseball bat' in detections and detections['baseball bat'] > 0:
+        sports_scores['baseball'] += 3.0
+
+    if 'baseball glove' in detections and detections['baseball glove'] > 0:
+        sports_scores['baseball'] += 2.0
+
+    # Xác định môn thể thao có điểm cao nhất
+    max_sport = max(sports_scores.items(), key=lambda x: x[1])
+    sport_name = max_sport[0]
+    confidence = min(max_sport[1] / 5.0, 1.0)  # Giới hạn độ tin cậy từ 0 đến 1
+
+    # Nếu không có môn thể thao nào có đủ điểm, đánh dấu là không xác định
+    if confidence < 0.4:
+        sport_name = 'unknown'
+        # Thử đoán dựa trên thể loại hoạt động
+        if posture.get('knee_bend') == 'strong':
+            activity_type = 'active movement'
+        elif posture.get('hip_bend') == 'forward':
+            activity_type = 'forward posture'
+        else:
+            activity_type = 'standing posture'
+
+        return {
+            'sport': 'unknown',
+            'activity_type': activity_type,
+            'confidence': confidence,
+            'all_scores': sports_scores
+        }
+
+    return {
+        'sport': sport_name,
+        'confidence': confidence,
+        'all_scores': sports_scores
+    }
+
+
+def get_sport_specific_analysis(pose_analysis, sport):
+    """
+    Cung cấp phân tích chuyên sâu dành riêng cho môn thể thao được xác định.
+
+    Args:
+        pose_analysis: Kết quả từ analyze_pose_data
+        sport: Tên môn thể thao được xác định
+
+    Returns:
+        Dictionary với phân tích cụ thể cho môn thể thao đó
+    """
+    if not pose_analysis or sport == 'unknown':
+        return {}
+
+    angles = pose_analysis.get('angles', {})
+    posture = pose_analysis.get('posture', {})
+
+    sport_analysis = {
+        'technique': {},
+        'observations': [],
+        'recommendations': []
+    }
+
+    if sport == 'running':
+        # Phân tích kỹ thuật chạy bộ
+        knee_angles = []
+        if 'left_knee' in angles:
+            knee_angles.append(angles['left_knee'])
+        if 'right_knee' in angles:
+            knee_angles.append(angles['right_knee'])
+
+        if knee_angles:
+            avg_knee = sum(knee_angles) / len(knee_angles)
+            sport_analysis['technique']['knee_angle'] = avg_knee
+
+            if avg_knee < 90:
+                sport_analysis['observations'].append("Góc đầu gối quá nhỏ, có thể gây mất hiệu quả")
+                sport_analysis['recommendations'].append("Nâng cao góc đầu gối khi chạy để tăng hiệu suất")
+            elif avg_knee > 170:
+                sport_analysis['observations'].append("Chân quá thẳng khi chạy")
+                sport_analysis['recommendations'].append("Giảm nhẹ góc đầu gối để tăng hiệu quả và giảm tác động")
+            else:
+                sport_analysis['observations'].append("Góc đầu gối phù hợp cho việc chạy")
+
+        # Phân tích góc cánh tay
+        elbow_angles = []
+        if 'left_elbow' in angles:
+            elbow_angles.append(angles['left_elbow'])
+        if 'right_elbow' in angles:
+            elbow_angles.append(angles['right_elbow'])
+
+        if elbow_angles:
+            avg_elbow = sum(elbow_angles) / len(elbow_angles)
+            sport_analysis['technique']['elbow_angle'] = avg_elbow
+
+            if avg_elbow < 70:
+                sport_analysis['observations'].append("Tay gập quá nhiều")
+                sport_analysis['recommendations'].append("Mở rộng nhẹ góc khuỷu tay để cải thiện cân bằng")
+            elif avg_elbow > 110:
+                sport_analysis['observations'].append("Tay quá thẳng khi chạy")
+                sport_analysis['recommendations'].append("Giữ tay gập nhẹ ở góc khoảng 90 độ để tối ưu năng lượng")
+            else:
+                sport_analysis['observations'].append("Góc khuỷu tay tốt cho chạy hiệu quả")
+
+        # Đánh giá tổng thể kỹ thuật chạy
+        sport_analysis['technique']['overall'] = "good" if len(
+            sport_analysis['recommendations']) <= 1 else "needs_improvement"
+
+    elif sport == 'basketball':
+        # Phân tích kỹ thuật bóng rổ
+        if 'left_elbow' in angles and 'right_elbow' in angles:
+            shooting_arm = 'left' if angles['left_elbow'] < angles['right_elbow'] else 'right'
+            shooting_elbow = angles[f'{shooting_arm}_elbow']
+
+            sport_analysis['technique']['shooting_arm'] = shooting_arm
+            sport_analysis['technique']['shooting_elbow_angle'] = shooting_elbow
+
+            if shooting_elbow < 45:
+                sport_analysis['observations'].append("Góc khuỷu tay hợp lý cho động tác ném bóng")
+            elif shooting_elbow < 90:
+                sport_analysis['observations'].append("Góc khuỷu tay có thể được điều chỉnh để tối ưu lực ném")
+            else:
+                sport_analysis['observations'].append("Góc khuỷu tay quá lớn cho động tác ném chuẩn xác")
+                sport_analysis['recommendations'].append("Giảm góc khuỷu tay khi ném để tăng độ chính xác")
+
+    # Tương tự cho các môn thể thao khác...
+
+    return sport_analysis
 
 
 def analyze_sports_environment(img_data, depth_map=None):
@@ -1226,6 +1568,59 @@ def detect_human_pose(img_data, conf_threshold=0.15, main_subject_box=None):
 
     print(f"DEBUG - pose_results có số poses: {len(pose_results.get('poses', []))}")
     return pose_results
+
+
+def segment_main_subject(img, yolo_seg, main_subject_box):
+    """
+    Phân đoạn main subject bằng cách so sánh box với masks từ YOLOv8-seg
+
+    Args:
+        img: Ảnh cần phân tích (numpy array)
+        yolo_seg: Model YOLOv8-seg đã load
+        main_subject_box: Bounding box của main subject [x1, y1, x2, y2]
+
+    Returns:
+        mask: Numpy array chứa mask của main subject hoặc None nếu không tìm thấy
+    """
+    # Chạy YOLOv8-seg để lấy masks
+    results = yolo_seg(img)
+
+    best_mask = None
+    best_iou = 0
+
+    # Kiểm tra các kết quả
+    for result in results:
+        if hasattr(result, 'masks') and result.masks is not None:
+            for i, mask in enumerate(result.masks.data):
+                # Lấy bbox tương ứng với mask
+                box = result.boxes.xyxy[i].cpu().numpy()
+
+                # Tính IoU giữa box của mask và main_subject_box
+                x1 = max(box[0], main_subject_box[0])
+                y1 = max(box[1], main_subject_box[1])
+                x2 = min(box[2], main_subject_box[2])
+                y2 = min(box[3], main_subject_box[3])
+
+                if x2 <= x1 or y2 <= y1:
+                    continue
+
+                intersection = (x2 - x1) * (y2 - y1)
+                box_area = (box[2] - box[0]) * (box[3] - box[1])
+                subject_area = (main_subject_box[2] - main_subject_box[0]) * (main_subject_box[3] - main_subject_box[1])
+                union = box_area + subject_area - intersection
+
+                iou = intersection / union
+
+                if iou > best_iou:
+                    best_iou = iou
+                    best_mask = mask.cpu().numpy()
+
+    if best_mask is not None and best_iou > 0.5:  # Ngưỡng IoU để chấp nhận mask
+        print(f"Tìm thấy mask cho main subject với IoU = {best_iou:.2f}")
+        return best_mask
+
+    print("Không tìm thấy mask phù hợp cho main subject")
+    return None
 
 
 def analyze_sports_composition(detections, analysis, img_data):
@@ -2216,6 +2611,10 @@ def visualize_emotion_results(face_img, emotion_analysis):
     return img_data
 
 
+def create_caption_visualization(caption, width):
+    pass
+
+
 def visualize_sports_results(img_data, detections, depth_map, sports_analysis, action_analysis, composition_analysis,
                              facial_analysis=None, caption=None):
     """Create sports-specific visualization with enhanced main subject highlighting, emotion analysis and caption"""
@@ -2231,12 +2630,18 @@ def visualize_sports_results(img_data, detections, depth_map, sports_analysis, a
     main_person = None
     main_person_idx = -1
 
-    if "key_subjects" in sports_analysis:
-        for idx, subject in enumerate(sports_analysis['key_subjects']):
-            if subject['class'] == 'person':
-                main_person = subject
-                main_person_idx = idx
-                break
+    if "key_subjects" in sports_analysis and sports_analysis['key_subjects']:
+        # Lấy chính xác đối tượng đầu tiên nếu là người
+        if sports_analysis['key_subjects'][0]['class'] == 'person':
+            main_person = sports_analysis['key_subjects'][0]
+            main_person_idx = 0
+        else:
+            # Nếu không, tìm người đầu tiên trong danh sách
+            for idx, subject in enumerate(sports_analysis['key_subjects']):
+                if subject['class'] == 'person':
+                    main_person = subject
+                    main_person_idx = idx
+                    break
 
     # Tạo visual cho detection với sharpness
     det_viz = img.copy()
@@ -2303,9 +2708,22 @@ def visualize_sports_results(img_data, detections, depth_map, sports_analysis, a
         blurred_bg = cv2.GaussianBlur(img, (25, 25), 0)
 
         # Tạo mask cho vùng người chính
-        x1, y1, x2, y2 = main_person['box']
         person_mask = np.zeros((height, width), dtype=np.uint8)
-        person_mask[y1:y2, x1:x2] = 255
+
+        # Sử dụng mask chi tiết từ segmentation nếu có
+        if 'main_subject_mask' in sports_analysis and sports_analysis['main_subject_mask'] is not None:
+            main_mask = sports_analysis['main_subject_mask']
+
+            # Resize mask nếu kích thước khác với ảnh
+            if main_mask.shape[:2] != (height, width):
+                main_mask = cv2.resize(main_mask, (width, height))
+
+            # Chuyển mask về binary
+            person_mask = (main_mask > 0.5).astype(np.uint8) * 255
+        else:
+            # Sử dụng bounding box nếu không có mask
+            x1, y1, x2, y2 = main_person['box']
+            person_mask[y1:y2, x1:x2] = 255
 
         # Thêm một border trơn mượt
         kernel = np.ones((15, 15), np.uint8)
@@ -2327,9 +2745,9 @@ def visualize_sports_results(img_data, detections, depth_map, sports_analysis, a
 
         # Đánh dấu box và thêm nhãn
         color = (0, 255, 255)  # Yellow for main person
-        cv2.rectangle(main_highlight, (x1, y1), (x2, y2), color, 3)
-        cv2.putText(main_highlight, "MAIN SUBJECT", (x1, y1 - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
+        #cv2.rectangle(main_highlight, (x1, y1), (x2, y2), color, 3)
+        #cv2.putText(main_highlight, "MAIN SUBJECT", (x1, y1 - 10),
+        #            cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
     else:
         main_highlight = img.copy()
 
@@ -2404,27 +2822,124 @@ def visualize_sports_results(img_data, detections, depth_map, sports_analysis, a
     pose_viz = img.copy()
 
     # Kiểm tra xác thực cấu trúc dữ liệu pose_analysis
+    # Kiểm tra xác thực cấu trúc dữ liệu pose_analysis
     if 'pose_analysis' in sports_analysis and isinstance(sports_analysis['pose_analysis'], dict) and 'poses' in \
             sports_analysis['pose_analysis']:
         poses = sports_analysis['pose_analysis']['poses']
 
-        # THAY ĐỔI: Lọc chỉ lấy pose của main subject
+        # Nếu có main subject mask thì dùng mask để tìm pose
         main_subject_pose = None
 
-        # Nếu có thông tin main_person, tìm pose phù hợp nhất
-        if main_person is not None:
-            main_x1, main_y1, main_x2, main_y2 = main_person['box']
-            main_center_x = (main_x1 + main_x2) / 2
-            main_center_y = (main_y1 + main_y2) / 2
+        # Kiểm tra xem có main subject mask không
+        if 'main_subject_mask' in sports_analysis and sports_analysis['main_subject_mask'] is not None:
+            main_mask = sports_analysis['main_subject_mask']
 
-            best_iou = 0
+            # Đảm bảo mask có kích thước phù hợp với ảnh
+            if main_mask.shape[:2] != (height, width):
+                # Resize mask nếu cần
+                main_mask = cv2.resize(main_mask, (width, height))
+
             best_pose = None
+            max_in_mask = 0
+            max_ratio = 0
+
+            print(f"Đang kiểm tra {len(poses)} poses với mask")
+
+            # Duyệt qua từng pose và kiểm tra keypoints trong mask
+            for idx, pose in enumerate(poses):
+                if 'keypoints' in pose and pose['keypoints']:
+                    # Đếm số keypoint nằm trong mask
+                    count_in_mask = 0
+                    total_keypoints = len(pose['keypoints'])
+
+                    for kp in pose['keypoints']:
+                        if kp['confidence'] < 0.2:  # Bỏ qua keypoints có độ tin cậy thấp
+                            continue
+
+                        x, y = int(kp['x']), int(kp['y'])
+
+                        # Kiểm tra x,y có nằm trong phạm vi mask không
+                        if 0 <= x < width and 0 <= y < height:
+                            # Kiểm tra keypoint có nằm trong mask không
+                            if main_mask[y, x] > 0.5:
+                                count_in_mask += 1
+
+                    # Tính tỷ lệ keypoints trong mask
+                    ratio = count_in_mask / total_keypoints if total_keypoints > 0 else 0
+
+                    print(f"Pose {idx}: {count_in_mask}/{total_keypoints} keypoints trong mask ({ratio * 100:.1f}%)")
+
+                    # Chỉ chọn pose có ít nhất 30% keypoints trong mask
+                    if ratio > max_ratio and ratio > 0.3:
+                        max_ratio = ratio
+                        max_in_mask = count_in_mask
+                        best_pose = pose
+                        print(f"  -> Pose {idx} hiện là pose tốt nhất với {ratio * 100:.1f}% keypoints trong mask")
+
+            if best_pose:
+                print(f"Đã tìm thấy pose phù hợp với mask: {max_in_mask} keypoints, {max_ratio * 100:.1f}%")
+                main_subject_pose = best_pose
+            else:
+                print(f"Không tìm thấy pose nào có đủ keypoints trong mask (ngưỡng 30%)")
+
+            if main_subject_pose:
+                # Phân tích chi tiết tư thế chính
+                pose_data_analysis = analyze_pose_data(main_subject_pose)
+                sports_analysis['pose_analysis']['detailed_analysis'] = pose_data_analysis
+
+                # Nhận diện môn thể thao
+                sport_identification = identify_sport_from_pose(pose_data_analysis, detections)
+                sports_analysis['sport_identification'] = sport_identification
+
+                # Phân tích chi tiết về môn thể thao
+                if sport_identification['sport'] != 'unknown':
+                    sport_specific = get_sport_specific_analysis(pose_data_analysis, sport_identification['sport'])
+                    sports_analysis['sport_specific_analysis'] = sport_specific
+
+        # Backup: Nếu không tìm được pose dựa trên mask, thử dùng IoU với box
+        if main_subject_pose is None and main_person is not None:
+            print("Thử tìm pose dựa trên IoU với bounding box")
+            main_x1, main_y1, main_x2, main_y2 = main_person['box']
+            best_iou = 0
 
             for pose in poses:
                 if 'bbox' in pose and pose['bbox']:
                     p_x1, p_y1, p_x2, p_y2 = pose['bbox']
 
                     # Tính IoU (Intersection over Union)
+                    x_left = max(main_x1, p_x1)
+                    y_top = max(main_y1, p_y1)
+                    x_right = min(main_x2, p_x2)
+                    y_bottom = min(main_y2, p_y2)
+
+                    if x_right <= x_left or y_bottom <= y_top:
+                        continue
+
+                    intersection = (x_right - x_left) * (y_bottom - y_top)
+                    main_area = (main_x2 - main_x1) * (main_y2 - main_y1)
+                    pose_area = (p_x2 - p_x1) * (p_y2 - p_y1)
+                    union = main_area + pose_area - intersection
+
+                    iou = intersection / union if union > 0 else 0
+                    print(f"IoU với pose bbox: {iou:.2f}")
+
+                    if iou > best_iou and iou > 0.3:
+                        best_iou = iou
+                        main_subject_pose = pose
+
+        # Backup: nếu không tìm được bằng mask, dùng bounding box
+        if main_subject_pose is None and main_person is not None:
+            main_x1, main_y1, main_x2, main_y2 = main_person['box']
+            main_center_x = (main_x1 + main_x2) / 2
+            main_center_y = (main_y1 + main_y2) / 2
+
+            # Tìm pose có bbox trùng nhiều nhất với main person box
+            best_iou = 0
+            for pose in poses:
+                if 'bbox' in pose and pose['bbox']:
+                    p_x1, p_y1, p_x2, p_y2 = pose['bbox']
+
+                    # Tính IoU
                     x_left = max(main_x1, p_x1)
                     y_top = max(main_y1, p_y1)
                     x_right = min(main_x2, p_x2)
@@ -2442,34 +2957,13 @@ def visualize_sports_results(img_data, detections, depth_map, sports_analysis, a
 
                     if iou > best_iou:
                         best_iou = iou
-                        best_pose = pose
+                        main_subject_pose = pose
 
-            if best_iou > 0.3:  # Ngưỡng IoU để xác định đúng người
-                main_subject_pose = best_pose
-                print(f"Main subject box: {main_x1}, {main_y1}, {main_x2}, {main_y2}")
-                print(f"Best pose box match: {best_pose['bbox'] if best_pose else 'None'}")
-                print(f"Best IoU: {best_iou}")
-
-            if best_iou <= 0.3 and main_person:
-                # Phương pháp 2: Tìm pose gần nhất với tâm main_person
-                main_center_x = (main_x1 + main_x2) / 2
-                main_center_y = (main_y1 + main_y2) / 2
-
-                min_distance = float('inf')
-                for pose in poses:
-                    if 'bbox' in pose and pose['bbox']:
-                        p_x1, p_y1, p_x2, p_y2 = pose['bbox']
-                        p_center_x = (p_x1 + p_x2) / 2
-                        p_center_y = (p_y1 + p_y2) / 2
-
-                        distance = ((p_center_x - main_center_x) ** 2 + (p_center_y - main_center_y) ** 2) ** 0.5
-                        if distance < min_distance:
-                            min_distance = distance
-                            best_pose = pose
-
-                # Nếu tìm được pose với khoảng cách hợp lý
-                if min_distance < (width * 0.2):  # 20% chiều rộng hình
-                    main_subject_pose = best_pose
+        # Nếu tìm được pose của main subject, chỉ xử lý pose đó
+        if main_subject_pose:
+            poses = [main_subject_pose]  # Chỉ xử lý pose của main subject
+        else:
+            poses = []  # Không có pose nào khớp với main subject
 
         # Nếu không tìm thấy theo IoU, lấy người có bbox lớn nhất/ở giữa nhất
         if main_subject_pose is None and poses:
@@ -2953,7 +3447,7 @@ def analyze_sports_image(file_path):
 
     # Load models
     print("Loading models...")
-    midas, yolo, device, yolo_seg = load_models()
+    midas, yolo, yolo_seg, device = load_models()
     print("Models loaded successfully.")
 
     img_data = preprocess_image(file_path)
@@ -2971,7 +3465,7 @@ def analyze_sports_image(file_path):
 
     # Step 3: Analyze sports scene with sharpness detection
     print("Analyzing sports scene with sharpness detection...")
-    sports_analysis = analyze_sports_scene(detections, depth_map, img_data)
+    sports_analysis = analyze_sports_scene(detections, depth_map, img_data, yolo_seg)
 
     # Step 4: Analyze action quality
     print("Analyzing action quality...")

@@ -16,7 +16,6 @@ from PyQt5.QtGui import QPixmap, QImage, QColor, QFont, QIcon, QFontDatabase
 # Bây giờ mới import qt_material
 try:
     import qt_material
-
     QT_MATERIAL_AVAILABLE = True
 except ImportError:
     QT_MATERIAL_AVAILABLE = False
@@ -466,6 +465,13 @@ class SportsAnalysisApp(QMainWindow):
         tab_face_layout.addWidget(face_content)
         self.tabs.addTab(self.tab_face, "Facial Expression")
 
+        # Tab 8: Pose Estimation (Thêm MỚI)
+        self.tab_pose = QWidget()
+        tab_pose_layout = QVBoxLayout(self.tab_pose)
+        self.pose_image_display = ImageDisplayWidget("Pose Estimation")
+        tab_pose_layout.addWidget(self.pose_image_display)
+        self.tabs.addTab(self.tab_pose, "Pose")
+
         # Tab 8: Thống kê
         self.tab_stats = QWidget()
         tab_stats_layout = QVBoxLayout(self.tab_stats)
@@ -597,6 +603,7 @@ class SportsAnalysisApp(QMainWindow):
         self.update_sharpness_tab(result)
         self.update_composition_tab(result)
         self.update_face_tab(result)
+        self.update_pose_tab(result)
         self.update_stats_tab(result)
 
         # Kích hoạt lại các nút
@@ -632,6 +639,12 @@ class SportsAnalysisApp(QMainWindow):
         if main_subject_image:
             self.main_subject_display.set_image(main_subject_image)
 
+    def update_pose_tab(self, result):
+        """Cập nhật tab pose estimation"""
+        pose_image = self.extract_component_image("pose")
+        if pose_image:
+            self.pose_image_display.set_image(pose_image)
+
     def update_depth_tab(self, result):
         """Cập nhật tab depth map"""
         depth_image = self.extract_component_image("depth")
@@ -664,6 +677,8 @@ class SportsAnalysisApp(QMainWindow):
             component_image_path = "depth_map.png"
         elif component_type == "sharpness":
             component_image_path = "sharpness_heatmap.png"
+        elif component_type == "pose":
+            component_image_path = "pose_estimation.png"
         elif component_type == "composition":
             component_image_path = "composition_analysis.png"
         elif component_type == "main_subject":
