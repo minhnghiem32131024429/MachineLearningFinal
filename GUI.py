@@ -2,7 +2,6 @@ import sys
 import os
 import numpy as np
 from ML_1 import generate_sports_caption
-from ML_1 import POSE_CONNECTIONS
 # Đặt biến môi trường trước khi import các thư viện khác
 os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 
@@ -10,7 +9,7 @@ os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QLabel, QFileDialog, QTabWidget, QSplitter,
                              QGraphicsDropShadowEffect, QProgressBar, QComboBox, QMessageBox,
-                             QSizePolicy, QFrame, QScrollArea, QGroupBox)
+                             QSizePolicy, QFrame, QScrollArea)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QSize, QUrl, QDir
 from PyQt5.QtGui import QPixmap, QImage, QColor, QFont, QIcon, QFontDatabase
 
@@ -473,84 +472,7 @@ class SportsAnalysisApp(QMainWindow):
         tab_pose_layout.addWidget(self.pose_image_display)
         self.tabs.addTab(self.tab_pose, "Pose")
 
-        # Tab 9: Action Analysis (Phân tích hành động)
-        self.tab_action = QWidget()
-        tab_action_layout = QVBoxLayout(self.tab_action)
-
-        action_content = QSplitter(Qt.Horizontal)
-
-        # Widget bên trái - hiển thị hình ảnh pose với nhãn hành động
-        action_left_widget = QWidget()
-        action_left_layout = QVBoxLayout(action_left_widget)
-
-        self.action_image_display = ImageDisplayWidget("Action Analysis")
-        action_left_layout.addWidget(self.action_image_display)
-
-        # Widget bên phải - thông tin chi tiết về hành động
-        action_right_widget = QWidget()
-        action_right_layout = QVBoxLayout(action_right_widget)
-
-        self.action_title = QLabel("Phân tích hành động")
-        self.action_title.setStyleSheet("font-size: 18px; font-weight: bold; margin-bottom: 10px;")
-        action_right_layout.addWidget(self.action_title)
-
-        # Widget hiển thị loại hành động
-        action_type_frame = QFrame()
-        action_type_layout = QHBoxLayout(action_type_frame)
-        action_type_layout.setContentsMargins(0, 0, 0, 0)
-
-        self.action_type_label = QLabel("Loại hành động:")
-        self.action_type_label.setStyleSheet("font-weight: bold;")
-        self.action_type_value = QLabel("Đang phân tích...")
-
-        action_type_layout.addWidget(self.action_type_label)
-        action_type_layout.addWidget(self.action_type_value)
-        action_type_layout.addStretch()
-        action_right_layout.addWidget(action_type_frame)
-
-        # Widget hiển thị độ tin cậy
-        confidence_frame = QFrame()
-        confidence_layout = QHBoxLayout(confidence_frame)
-        confidence_layout.setContentsMargins(0, 0, 0, 0)
-
-        self.action_confidence_label = QLabel("Độ tin cậy:")
-        self.action_confidence_label.setStyleSheet("font-weight: bold;")
-        self.action_confidence_bar = QProgressBar()
-        self.action_confidence_bar.setRange(0, 100)
-        self.action_confidence_bar.setValue(0)
-        self.action_confidence_bar.setTextVisible(True)
-        self.action_confidence_bar.setFormat("%v%")
-
-        confidence_layout.addWidget(self.action_confidence_label)
-        confidence_layout.addWidget(self.action_confidence_bar, 1)
-        action_right_layout.addWidget(confidence_frame)
-
-        # Widget hiển thị chi tiết góc các khớp
-        self.action_details_group = QGroupBox("Chi tiết góc khớp")
-        action_details_layout = QVBoxLayout(self.action_details_group)
-
-        self.r_elbow_label = QLabel("Góc khuỷu tay phải: --°")
-        self.l_elbow_label = QLabel("Góc khuỷu tay trái: --°")
-        self.r_knee_label = QLabel("Góc đầu gối phải: --°")
-        self.l_knee_label = QLabel("Góc đầu gối trái: --°")
-
-        action_details_layout.addWidget(self.r_elbow_label)
-        action_details_layout.addWidget(self.l_elbow_label)
-        action_details_layout.addWidget(self.r_knee_label)
-        action_details_layout.addWidget(self.l_knee_label)
-
-        action_right_layout.addWidget(self.action_details_group)
-        action_right_layout.addStretch()
-
-        # Thêm các widget vào splitter
-        action_content.addWidget(action_left_widget)
-        action_content.addWidget(action_right_widget)
-        action_content.setSizes([600, 400])
-
-        tab_action_layout.addWidget(action_content)
-        self.tabs.addTab(self.tab_action, "Action Analysis")
-
-        # Tab: Thống kê
+        # Tab 8: Thống kê
         self.tab_stats = QWidget()
         tab_stats_layout = QVBoxLayout(self.tab_stats)
 
@@ -609,38 +531,6 @@ class SportsAnalysisApp(QMainWindow):
         card.setGraphicsEffect(shadow)
 
         return card
-
-    def update_action_analysis(self, action_data):
-        """Cập nhật tab Action Analysis với dữ liệu phân tích hành động."""
-        if action_data is None:
-            self.action_type_value.setText("Không tìm thấy dữ liệu")
-            self.action_confidence_bar.setValue(0)
-            self.r_elbow_label.setText("Góc khuỷu tay phải: --°")
-            self.l_elbow_label.setText("Góc khuỷu tay trái: --°")
-            self.r_knee_label.setText("Góc đầu gối phải: --°")
-            self.l_knee_label.setText("Góc đầu gối trái: --°")
-            return
-
-        # Cập nhật thông tin hành động
-        self.action_type_value.setText(action_data['description'])
-        confidence = int(action_data['confidence'] * 100)
-        self.action_confidence_bar.setValue(confidence)
-
-        # Tùy chỉnh màu dựa trên độ tin cậy
-        if confidence > 75:
-            self.action_confidence_bar.setStyleSheet("QProgressBar::chunk {background-color: #4CAF50;}")
-        elif confidence > 50:
-            self.action_confidence_bar.setStyleSheet("QProgressBar::chunk {background-color: #2196F3;}")
-        else:
-            self.action_confidence_bar.setStyleSheet("QProgressBar::chunk {background-color: #FFC107;}")
-
-        # Cập nhật chi tiết góc nếu có
-        if 'angles' in action_data:
-            angles = action_data['angles']
-            self.r_elbow_label.setText(f"Góc khuỷu tay phải: {angles['r_elbow']:.1f}°")
-            self.l_elbow_label.setText(f"Góc khuỷu tay trái: {angles['l_elbow']:.1f}°")
-            self.r_knee_label.setText(f"Góc đầu gối phải: {angles['r_knee']:.1f}°")
-            self.l_knee_label.setText(f"Góc đầu gối trái: {angles['l_knee']:.1f}°")
 
     def open_image(self):
         """Mở hộp thoại chọn ảnh"""
@@ -795,8 +685,6 @@ class SportsAnalysisApp(QMainWindow):
             component_image_path = "main_subject_highlight.png"
         elif component_type == "detection":
             component_image_path = "detections.png"
-        elif component_type == "action":
-            component_image_path = "action_analysis.png"
 
         # Kiểm tra xem file riêng biệt có tồn tại không
         if component_image_path and os.path.exists(component_image_path):
