@@ -503,8 +503,10 @@ def load_models():
         from ultralytics import YOLO
         yolo = YOLO("yolov8x.pt")  # Load the largest YOLOv8 model
         print("YOLO model loaded successfully.")
+        yolo_seg = YOLO("yolov8x-seg.pt")
+        print("YOLOv8-seg model loaded successfully.")
 
-        return midas, yolo, device
+        return midas, yolo, yolo_seg, device
 
     except Exception as e:
         print(f"Error loading models: {str(e)}")
@@ -2951,7 +2953,7 @@ def analyze_sports_image(file_path):
 
     # Load models
     print("Loading models...")
-    midas, yolo, device = load_models()
+    midas, yolo, device, yolo_seg = load_models()
     print("Models loaded successfully.")
 
     img_data = preprocess_image(file_path)
