@@ -31,8 +31,18 @@ except ImportError:
     POSE_MODEL_AVAILABLE = False
     print("YOLOv8-Pose không khả dụng. Cài đặt với: pip install ultralytics")
 
+# Định nghĩa kết nối giữa các keypoints cho khung xương
+POSE_CONNECTIONS = [
+    # Đầu
+    (0, 1), (0, 2), (1, 3), (2, 4), (3, 5), (4, 6),
+    # Thân
+    (5, 6), (5, 11), (6, 12), (11, 12),
+    # Tay
+    (5, 7), (7, 9), (6, 8), (8, 10),
+    # Chân
+    (11, 13), (13, 15), (12, 14), (14, 16)
+]
 
-# THÊM HÀM này vào ML_1.py, trước hàm analyze_sports_image
 def classify_sports_ball_with_clip(image, box, device=None):
     """
     Sử dụng CLIP để phân loại chính xác loại bóng từ vùng đã phát hiện là 'sports ball'
@@ -132,7 +142,7 @@ def classify_sports_ball_with_clip(image, box, device=None):
     # Nếu không chắc chắn, giữ nguyên nhãn gốc
     return "sports ball"
 
-# DNN Face Detection Functions
+
 def detect_faces_improved(image):
     """
     Phát hiện khuôn mặt với DNN model - cải thiện cho nhiều loại da và góc quay
@@ -436,6 +446,7 @@ def select_best_face(faces, image):
 
     return best_face
 
+
 def check_dependencies():
     required_packages = {
         'ultralytics': 'ultralytics',
@@ -485,7 +496,6 @@ def check_dependencies():
     print("All dependencies checked and installed.")
 
 
-# Setup device and load models
 def load_models():
     try:
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -621,7 +631,6 @@ def generate_depth_map(midas, img_data):
     return normalized_depth, depth_mask, main_contour
 
 
-# Hàm phân tích độ sắc nét của đối tượng (MỚI)
 def analyze_object_sharpness(image, boxes):
     """Phân tích độ sắc nét của từng đối tượng trong ảnh"""
     # Chuyển sang ảnh grayscale nếu đầu vào là RGB
@@ -875,6 +884,17 @@ def analyze_sports_scene(detections, depth_map, img_data, yolo_seg=None):
 
         # Lưu mask vào kết quả phân tích
         sports_analysis['main_subject_mask'] = main_subject_mask
+
+    # Phân tích hành động của vận động viên chính từ pose data
+    if 'pose_analysis' in sports_analysis and isinstance(sports_analysis['pose_analysis'], dict) and 'poses' in \
+            sports_analysis['pose_analysis']:
+        poses = sports_analysis['pose_analysis']['poses']
+        if poses and len(poses) > 0:
+            # Phân tích hành động dựa trên pose đầu tiên (hoặc pose được lọc theo main subject)
+            main_pose = poses[0]
+            action_analysis = analyze_athlete_action(main_pose)
+            sports_analysis['action_analysis'] = action_analysis
+            print(f"Phân tích hành động: {action_analysis['action']} - {action_analysis['description']}")
 
     return sports_analysis
 
@@ -1443,7 +1463,180 @@ def analyze_sports_composition(detections, analysis, img_data):
     return result
 
 
-# Hàm phân tích biểu cảm nâng cao kết hợp DeepFace và phân tích ngữ cảnh
+def analyze_athlete_action(pose_data):
+    """
+    Phân tích hành động của vận động viên dựa trên dữ liệu pose.
+
+    Args:
+        pose_data (dict): Dữ liệu pose của vận động viên chính
+
+    Returns:
+        dict: Kết quả phân tích hành động và độ tin cậy
+    """
+    if not pose_data or 'keypoints' not in pose_data:
+        return {'action': 'unknown', 'confidence': 0, 'description': 'Không đủ dữ liệu pose'}
+
+    # Lấy các keypoints
+    keypoints = {}
+    for kp in pose_data['keypoints']:
+        keypoints[kp['id']] = {'x': kp['x'], 'y': kp['y'], 'conf': kp['confidence']}
+
+    # Tính các vector chuyển động và góc cho phân tích
+    vectors = {}
+    angles = {}
+
+    # Kiểm tra đủ keypoints để phân tích
+    required_keypoints = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]  # vai, khuỷu, cổ tay, hông, đầu gối, cổ chân
+    if not all(i in keypoints for i in required_keypoints):
+        return {'action': 'standing', 'confidence': 0.3, 'description': 'Đang đứng hoặc tư thế tĩnh'}
+
+    # Tính góc khuỷu tay
+    try:
+        # Góc khuỷu tay phải (vai - khuỷu - cổ tay)
+        r_elbow_angle = calculate_angle(
+            [keypoints[6]['x'], keypoints[6]['y']],  # vai phải
+            [keypoints[8]['x'], keypoints[8]['y']],  # khuỷu phải
+            [keypoints[10]['x'], keypoints[10]['y']]  # cổ tay phải
+        )
+
+        # Góc khuỷu tay trái
+        l_elbow_angle = calculate_angle(
+            [keypoints[5]['x'], keypoints[5]['y']],  # vai trái
+            [keypoints[7]['x'], keypoints[7]['y']],  # khuỷu trái
+            [keypoints[9]['x'], keypoints[9]['y']]  # cổ tay trái
+        )
+
+        # Góc đầu gối phải
+        r_knee_angle = calculate_angle(
+            [keypoints[12]['x'], keypoints[12]['y']],  # hông phải
+            [keypoints[14]['x'], keypoints[14]['y']],  # đầu gối phải
+            [keypoints[16]['x'], keypoints[16]['y']]  # cổ chân phải
+        )
+
+        # Góc đầu gối trái
+        l_knee_angle = calculate_angle(
+            [keypoints[11]['x'], keypoints[11]['y']],  # hông trái
+            [keypoints[13]['x'], keypoints[13]['y']],  # đầu gối trái
+            [keypoints[15]['x'], keypoints[15]['y']]  # cổ chân trái
+        )
+
+        # Tính chiều cao của người (khoảng cách từ mũi đến mắt cá)
+        height_ratio = 0
+
+        if 0 in keypoints and 15 in keypoints and 16 in keypoints:
+            nose_y = keypoints[0]['y']
+            avg_ankle_y = (keypoints[15]['y'] + keypoints[16]['y']) / 2
+            person_height = abs(avg_ankle_y - nose_y)
+
+            # Tính độ cao của trọng tâm so với chiều cao
+            hip_y = (keypoints[11]['y'] + keypoints[12]['y']) / 2
+            height_ratio = (avg_ankle_y - hip_y) / person_height
+
+        # Lưu các góc tính được
+        angles = {
+            'r_elbow': r_elbow_angle,
+            'l_elbow': l_elbow_angle,
+            'r_knee': r_knee_angle,
+            'l_knee': l_knee_angle,
+            'height_ratio': height_ratio
+        }
+
+        # Xác định hành động dựa vào góc của các khớp
+        return determine_action(angles)
+
+    except Exception as e:
+        print(f"Lỗi khi phân tích hành động: {e}")
+        return {'action': 'unknown', 'confidence': 0, 'description': f'Lỗi phân tích: {str(e)}'}
+
+
+def calculate_angle(a, b, c):
+    """Tính góc giữa ba điểm (tính bằng độ)"""
+    # Vector AB và BC
+    ab = [b[0] - a[0], b[1] - a[1]]
+    bc = [c[0] - b[0], c[1] - b[1]]
+
+    # Tích vô hướng
+    dot_product = ab[0] * bc[0] + ab[1] * bc[1]
+
+    # Độ dài vector
+    ab_magnitude = math.sqrt(ab[0] ** 2 + ab[1] ** 2)
+    bc_magnitude = math.sqrt(bc[0] ** 2 + bc[1] ** 2)
+
+    # Tính góc
+    if ab_magnitude * bc_magnitude == 0:
+        return 0
+
+    cos_angle = dot_product / (ab_magnitude * bc_magnitude)
+    cos_angle = max(-1, min(1, cos_angle))  # Đảm bảo giá trị nằm trong [-1, 1]
+    angle = math.degrees(math.acos(cos_angle))
+
+    return angle
+
+
+def determine_action(angles):
+    """Xác định hành động dựa vào các góc khớp"""
+    r_elbow = angles['r_elbow']
+    l_elbow = angles['l_elbow']
+    r_knee = angles['r_knee']
+    l_knee = angles['l_knee']
+    height_ratio = angles['height_ratio']
+
+    # Phát hiện chạy: Một chân duỗi thẳng, một chân gập
+    if ((r_knee < 120 and l_knee > 150) or (l_knee < 120 and r_knee > 150)) and height_ratio > 0.4:
+        return {
+            'action': 'running',
+            'confidence': 0.85,
+            'description': 'Đang chạy',
+            'angles': angles
+        }
+
+    # Phát hiện nhảy: Cả hai chân đều gập, thân người cao hơn bình thường
+    if r_knee < 110 and l_knee < 110 and height_ratio > 0.6:
+        return {
+            'action': 'jumping',
+            'confidence': 0.8,
+            'description': 'Đang nhảy',
+            'angles': angles
+        }
+
+    # Phát hiện nhồi bóng (dribbling): Một tay gập mạnh, thân người nghiêng
+    if (r_elbow < 100 or l_elbow < 100) and height_ratio > 0.45:
+        return {
+            'action': 'dribbling',
+            'confidence': 0.7,
+            'description': 'Đang nhồi bóng',
+            'angles': angles
+        }
+
+    # Phát hiện ném/sút: Tay duỗi thẳng, góc lớn
+    if (r_elbow > 160 or l_elbow > 160) and (r_knee > 150 or l_knee > 150):
+        return {
+            'action': 'throwing',
+            'confidence': 0.75,
+            'description': 'Đang ném/sút',
+            'angles': angles
+        }
+
+    # Phát hiện tư thế phòng thủ: Chân rộng, gập nhẹ
+    if 110 < r_knee < 150 and 110 < l_knee < 150 and 0.3 < height_ratio < 0.5:
+        return {
+            'action': 'defending',
+            'confidence': 0.65,
+            'description': 'Tư thế phòng thủ',
+            'angles': angles
+        }
+
+    # Mở rộng với các hành động khác...
+    # Có thể thêm các hành động như bóng đá, bóng chuyền, tennis, etc.
+
+    # Mặc định trả về tư thế đứng
+    return {
+        'action': 'standing',
+        'confidence': 0.5,
+        'description': 'Đang đứng hoặc tư thế chưa xác định',
+        'angles': angles
+    }
+
 
 def analyze_facial_expression_advanced(detections, img_data, depth_map=None, sports_analysis=None):
     """Phân tích biểu cảm khuôn mặt nâng cao với OpenCV và HSEmotion, tập trung vào đối tượng chính"""
@@ -2141,6 +2334,7 @@ def analyze_facial_expression_advanced(detections, img_data, depth_map=None, spo
         traceback.print_exc()
         return {'has_faces': False, 'error': str(e), 'debug_info': {'reason': f"Error: {str(e)}"}}
 
+
 def visualize_emotion_results(face_img, emotion_analysis):
     """Tạo hiển thị chuyên nghiệp cho phân tích biểu cảm khuôn mặt"""
     # Nếu không có phân tích cảm xúc, tạo hình ảnh thông báo lỗi
@@ -2283,6 +2477,10 @@ def visualize_emotion_results(face_img, emotion_analysis):
     plt.close(fig)
 
     return img_data
+
+
+def create_caption_visualization(caption, width):
+    pass
 
 
 def visualize_sports_results(img_data, detections, depth_map, sports_analysis, action_analysis, composition_analysis,
@@ -3638,6 +3836,7 @@ def generate_sports_caption(analysis_result):
     caption = caption.replace(' .', '.')
 
     return caption
+
 
 def main():
     # Parse command line arguments
