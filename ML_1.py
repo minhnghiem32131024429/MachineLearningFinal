@@ -4045,6 +4045,63 @@ def generate_sports_caption(analysis_result):
 
     return caption
 
+
+def generate_smart_suggestion(analysis_result):
+    """
+    Tạo 1 câu gợi ý thông minh dựa trên kết quả phân tích
+    """
+    # Lấy các thông số từ kết quả phân tích
+    action_level = analysis_result.get('action_analysis', {}).get('action_level', 0)
+    framing_quality = analysis_result.get('composition_analysis', {}).get('framing_quality', 'Unknown')
+    athletes_count = analysis_result.get('detections', {}).get('athletes', 0)
+    sport_type = analysis_result.get('composition_analysis', {}).get('sport_type', 'Unknown')
+
+    # Tính điểm sharpness trung bình nếu có
+    avg_sharpness = 0
+    if 'sports_analysis' in analysis_result and 'sharpness_scores' in analysis_result['sports_analysis']:
+        sharpness_scores = analysis_result['sports_analysis']['sharpness_scores']
+        if sharpness_scores:
+            avg_sharpness = sum(sharpness_scores) / len(sharpness_scores)
+
+    # Kiểm tra có emotion không
+    has_emotion = analysis_result.get('facial_analysis', {}).get('has_faces', False)
+    emotion_intensity = analysis_result.get('facial_analysis', {}).get('emotion_intensity', 0) if has_emotion else 0
+
+    # Ưu tiên theo mức độ quan trọng
+    # 1. Action level thấp
+    if action_level < 0.4:
+        return "Try capturing during peak action moments for more dynamic sports photography."
+
+    # 2. Framing kém
+    if framing_quality in ['Poor', 'Could be improved', 'Fair']:
+        return "Apply the rule of thirds and ensure subjects are well-positioned in the frame."
+
+    # 3. Sharpness thấp
+    if avg_sharpness < 0.5:
+        return "Use faster shutter speed and proper focus to achieve sharper subject details."
+
+    # 4. Không có emotion
+    if not has_emotion and athletes_count > 0:
+        return "Consider angles that capture athlete expressions for more engaging storytelling."
+
+    # 5. Emotion tốt
+    if has_emotion and emotion_intensity > 0.7:
+        return "Excellent emotional capture! This adds great storytelling value to your sports photo."
+
+    # 6. Action tốt nhưng có thể cải thiện khác
+    if action_level > 0.7 and avg_sharpness > 0.6:
+        return "Great action shot! Consider varying angles or including more context for visual variety."
+
+    # 7. Suggestion chung theo môn thể thao
+    if sport_type.lower() in ['soccer', 'football', 'basketball']:
+        return "For team sports, try capturing player interactions and tactical moments."
+    elif sport_type.lower() in ['tennis', 'golf', 'athletics']:
+        return "Focus on technique and form - these sports offer great opportunities for skill showcase."
+
+    # 8. Default suggestion
+    return "Solid sports photography! Experiment with different perspectives to add creative flair."
+
+
 def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Sports Image Analysis')
@@ -4070,6 +4127,8 @@ def main():
     analysis = analyze_sports_image(image_path)
     print("Analysis complete. Results saved to sports_analysis_results.png and analysis_results.txt")
     return analysis
+
+
 
 
 if __name__ == "__main__":

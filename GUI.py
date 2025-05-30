@@ -1,6 +1,6 @@
 import sys
 import os
-from ML_1 import generate_sports_caption, analyze_sports_image
+from ML_1 import generate_sports_caption, analyze_sports_image, generate_smart_suggestion
 ML_IMPORT_SUCCESS = True
 os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -409,6 +409,8 @@ class SportsAnalysisApp(QMainWindow):
         super().__init__()
         self.setWindowTitle("Sports Image Analysis Pro")
         self.setMinimumSize(1200, 800)
+        self.resize(1920, 1080)
+        self.showMaximized()
 
         # Áp dụng qt-material nếu có sẵn
         if QT_MATERIAL_AVAILABLE:
@@ -1226,7 +1228,7 @@ class SportsAnalysisApp(QMainWindow):
 
         create_info_label("🏃 Number of athletes:", athletes_count, 0, 0)
         create_info_label("⚽ Sport type:", sport_type, 0, 1)
-        create_info_label("📷 Framiing quality:", framing_quality, 1, 0)
+        create_info_label("📷 Framing quality:", framing_quality, 1, 0)
         create_info_label("🎯 Action quality:", f"{action_quality} ({action_level:.2f})", 1, 1)
 
         # Equipment nếu có
@@ -1350,12 +1352,16 @@ class SportsAnalysisApp(QMainWindow):
                 table_layout.addWidget(table)
                 main_layout.addWidget(table_group)
 
-        # 3. Emotion Block GroupBox
-        emotion_group = QGroupBox("😊 Facial Emotion Analysis")
+        # 3. Emotion & Suggestion Layout (chia đôi)
+        emotion_suggestion_layout = QHBoxLayout()
+        emotion_suggestion_layout.setSpacing(15)
+
+        # 3.1. Emotion Analysis (50%)
+        emotion_group = QGroupBox("😊 Facial Expression Analysis")
         emotion_group.setStyleSheet("""
             QGroupBox {
                 font-weight: bold;
-                font-size: 21px;
+                font-size: 16px;
                 border: 2px solid #9C27B0;
                 border-radius: 8px;
                 margin-top: 15px;
@@ -1369,7 +1375,7 @@ class SportsAnalysisApp(QMainWindow):
                 top: -8px;
                 padding: 10px 8px 4px 8px;
                 color: #9C27B0;
-                font-size: 21px;
+                font-size: 16px;
                 font-weight: bold;
                 background-color: white;
                 border: 1px solid #9C27B0;
@@ -1384,7 +1390,7 @@ class SportsAnalysisApp(QMainWindow):
         if 'facial_analysis' in result and result['facial_analysis'].get('has_faces', False):
             facial = result['facial_analysis']
 
-            # Container cho emotion info
+            # Container cho emotion info (compact version)
             emotion_container = QWidget()
             emotion_container.setStyleSheet("""
                 background: linear-gradient(135deg, #fff3e0, #ffe0b2);
@@ -1393,92 +1399,88 @@ class SportsAnalysisApp(QMainWindow):
                 border-left: 4px solid #FF9800;
             """)
 
-            emotion_info_layout = QHBoxLayout(emotion_container)
-            emotion_info_layout.setSpacing(20)
+            emotion_info_layout = QVBoxLayout(emotion_container)
+            emotion_info_layout.setSpacing(10)
 
-            # Icon lớn cho emotion
+            # Emotion header với icon nhỏ hơn
+            emotion_header = QHBoxLayout()
+
             dominant_emotion = facial.get('dominant_emotion', 'unknown')
             emotion_icons = {
-                'happy': '😊',
-                'sad': '😢',
-                'angry': '😠',
-                'surprise': '😲',
-                'fear': '😨',
-                'disgust': '🤢',
-                'neutral': '😐',
-                'determination': '💪',
-                'focus': '🎯'
+                'happy': '😊', 'sad': '😢', 'angry': '😠', 'surprise': '😲',
+                'fear': '😨', 'disgust': '🤢', 'neutral': '😐',
+                'determination': '💪', 'focus': '🎯'
             }
 
             emotion_icon = emotion_icons.get(dominant_emotion.lower(), '😐')
 
             icon_label = QLabel(emotion_icon)
-            icon_label.setStyleSheet("font-size: 48px;")
+            icon_label.setStyleSheet("font-size: 36px; background: transparent;")
             icon_label.setAlignment(Qt.AlignCenter)
-            icon_label.setFixedSize(80, 80)
+            icon_label.setFixedSize(80, 80)  # Tăng từ 50x50 lên 60x60
 
-            # Thông tin emotion
-            emotion_info = QWidget()
-            emotion_detail_layout = QVBoxLayout(emotion_info)
-            emotion_detail_layout.setSpacing(5)
+            # Emotion name và info
+            emotion_info_widget = QWidget()
+            emotion_detail_layout = QVBoxLayout(emotion_info_widget)
+            emotion_detail_layout.setSpacing(3)
 
-            # Tên emotion
             emotion_name = QLabel(dominant_emotion.title())
-            emotion_name.setStyleSheet("font-size: 20px; font-weight: bold; color: #495057;")
+            emotion_name.setStyleSheet("font-size: 16px; font-weight: bold; color: #495057;")
 
-            emotion_subtitle = QLabel("Emotion")
-            emotion_subtitle.setStyleSheet("color: #6c757d; font-size: 12px;")
+            emotion_subtitle = QLabel("Dominant Emotion")
+            emotion_subtitle.setStyleSheet("color: #6c757d; font-size: 11px;")
 
             emotion_detail_layout.addWidget(emotion_name)
             emotion_detail_layout.addWidget(emotion_subtitle)
 
-            # Metrics
+            emotion_header.addWidget(icon_label)
+            emotion_header.addWidget(emotion_info_widget, 1)
+            emotion_header.setSpacing(15)  # **THÊM DÒNG NÀY**
+            emotion_header.setContentsMargins(5, 5, 5, 5)  # **THÊM DÒNG NÀY**
+
+            emotion_info_layout.addLayout(emotion_header)
+
+            # Metrics compact
             emotion_intensity = facial.get('emotion_intensity', 0)
             emotional_value = facial.get('emotional_value', 'Unknown')
 
             metrics_layout = QHBoxLayout()
 
-            # Intensity metric
+            # Intensity
             intensity_widget = QWidget()
             intensity_widget.setStyleSheet("""
-                background: white;
-                border-radius: 6px;
-                padding: 10px;
-                border: 1px solid #dee2e6;
+                background: white; border-radius: 4px; padding: 8px; border: 1px solid #dee2e6;
             """)
             intensity_layout = QVBoxLayout(intensity_widget)
             intensity_layout.setAlignment(Qt.AlignCenter)
             intensity_layout.setSpacing(2)
 
             intensity_value = QLabel(f"{emotion_intensity:.2f}")
-            intensity_value.setStyleSheet("font-size: 18px; font-weight: bold; color: #2196F3;")
+            intensity_value.setStyleSheet("font-size: 14px; font-weight: bold; color: #2196F3;")
             intensity_value.setAlignment(Qt.AlignCenter)
 
             intensity_label = QLabel("Intensity")
-            intensity_label.setStyleSheet("font-size: 10px; color: #6c757d; text-transform: uppercase;")
+            intensity_label.setStyleSheet("font-size: 9px; color: #6c757d;")
             intensity_label.setAlignment(Qt.AlignCenter)
 
             intensity_layout.addWidget(intensity_value)
             intensity_layout.addWidget(intensity_label)
 
-            # Value metric
+            # Value
             value_widget = QWidget()
             value_widget.setStyleSheet("""
-                background: white;
-                border-radius: 6px;
-                padding: 10px;
-                border: 1px solid #dee2e6;
+                background: white; border-radius: 4px; padding: 8px; border: 1px solid #dee2e6;
             """)
             value_layout = QVBoxLayout(value_widget)
             value_layout.setAlignment(Qt.AlignCenter)
             value_layout.setSpacing(2)
 
             value_value = QLabel(emotional_value)
-            value_value.setStyleSheet("font-size: 18px; font-weight: bold; color: #2196F3;")
+            value_value.setStyleSheet("font-size: 14px; font-weight: bold; color: #2196F3;")
             value_value.setAlignment(Qt.AlignCenter)
 
-            value_label = QLabel("Emotion Value")
-            value_label.setStyleSheet("font-size: 10px; color: #6c757d; text-transform: uppercase;")
+            value_label = QLabel("Value")
+            value_label.setStyleSheet("font-size: 9px; color: #6c757d;")
             value_label.setAlignment(Qt.AlignCenter)
 
             value_layout.addWidget(value_value)
@@ -1487,49 +1489,39 @@ class SportsAnalysisApp(QMainWindow):
             metrics_layout.addWidget(intensity_widget)
             metrics_layout.addWidget(value_widget)
 
-            emotion_detail_layout.addLayout(metrics_layout)
-
-            emotion_info_layout.addWidget(icon_label)
-            emotion_info_layout.addWidget(emotion_info, 1)
-
+            emotion_info_layout.addLayout(metrics_layout)
             emotion_layout.addWidget(emotion_container)
 
-            # Original emotion nếu khác
+            # Original emotion nếu khác (compact)
             if 'original_emotion' in facial and facial['original_emotion'] != dominant_emotion:
                 original_widget = QWidget()
                 original_widget.setStyleSheet("""
-                    background: rgba(255,193,7,0.1);
-                    border-radius: 5px;
-                    padding: 10px;
-                    border: 1px solid #FFC107;
+                    background: rgba(255,193,7,0.1); border-radius: 4px; padding: 8px; border: 1px solid #FFC107;
                 """)
                 original_layout = QHBoxLayout(original_widget)
 
-                original_label = QLabel(f"Orignial Emotion: {facial['original_emotion']}")
-                original_label.setStyleSheet("font-weight: bold; color: #495057;")
+                original_label = QLabel(f"Original: {facial['original_emotion']}")
+                original_label.setStyleSheet("font-weight: bold; color: #495057; font-size: 12px;")
 
                 original_layout.addWidget(original_label)
                 emotion_layout.addWidget(original_widget)
 
         else:
-            # Không phát hiện được khuôn mặt
+            # No face detected (compact)
             no_face_widget = QWidget()
             no_face_widget.setStyleSheet("""
-                background: #f8f9fa;
-                border-radius: 8px;
-                padding: 30px;
-                border: 2px dashed #dee2e6;
+                background: #f8f9fa; border-radius: 6px; padding: 20px; border: 2px dashed #dee2e6;
             """)
 
             no_face_layout = QVBoxLayout(no_face_widget)
             no_face_layout.setAlignment(Qt.AlignCenter)
 
             no_face_icon = QLabel("😔")
-            no_face_icon.setStyleSheet("font-size: 48px;")
+            no_face_icon.setStyleSheet("font-size: 32px;")
             no_face_icon.setAlignment(Qt.AlignCenter)
 
-            no_face_text = QLabel("No faces detected")
-            no_face_text.setStyleSheet("font-size: 16px; color: #6c757d; font-style: italic;")
+            no_face_text = QLabel("No face detected")
+            no_face_text.setStyleSheet("font-size: 14px; color: #6c757d; font-style: italic;")
             no_face_text.setAlignment(Qt.AlignCenter)
 
             no_face_layout.addWidget(no_face_icon)
@@ -1537,7 +1529,120 @@ class SportsAnalysisApp(QMainWindow):
 
             emotion_layout.addWidget(no_face_widget)
 
-        main_layout.addWidget(emotion_group)
+        # 3.2. Smart Suggestions (50%)
+        suggestions_group = QGroupBox("💡 Smart Suggestions")
+        suggestions_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                font-size: 16px;
+                border: 2px solid #4CAF50;
+                border-radius: 8px;
+                margin-top: 15px;
+                padding-top: 15px;
+                background-color: white;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                left: 15px;
+                top: -8px;
+                padding: 10px 8px 4px 8px;
+                color: #4CAF50;
+                font-size: 16px;
+                font-weight: bold;
+                background-color: white;
+                border: 1px solid #4CAF50;
+                border-radius: 4px;
+            }
+        """)
+
+        suggestions_layout = QVBoxLayout(suggestions_group)
+        suggestions_layout.setContentsMargins(15, 20, 15, 15)
+        suggestions_layout.setSpacing(8)
+
+        # **THAY THẾ TẤT CẢ ĐOẠN GENERATE SUGGESTIONS BẰNG:**
+        # Import hàm từ ML_1
+        from ML_1 import generate_smart_suggestion
+
+        # Lấy 1 suggestion duy nhất
+        smart_suggestion = generate_smart_suggestion(result)
+
+        # Tạo suggestion với icon phù hợp
+        if "action" in smart_suggestion.lower():
+            suggestion_icon = "🎯"
+        elif "framing" in smart_suggestion.lower() or "frame" in smart_suggestion.lower():
+            suggestion_icon = "📸"
+        elif "sharp" in smart_suggestion.lower() or "focus" in smart_suggestion.lower():
+            suggestion_icon = "🔍"
+        elif "emotion" in smart_suggestion.lower() or "expression" in smart_suggestion.lower():
+            suggestion_icon = "😊"
+        elif "excellent" in smart_suggestion.lower() or "great" in smart_suggestion.lower():
+            suggestion_icon = "✨"
+        else:
+            suggestion_icon = "💡"
+
+        suggestions = [{
+            'icon': suggestion_icon,
+            'title': 'Smart Recommendation',
+            'desc': smart_suggestion
+        }]
+
+        # Default suggestions if none generated
+        if not suggestions:
+            suggestions = [
+                {'icon': '📷', 'title': 'Great Shot!', 'desc': 'This image shows good sports photography fundamentals.'},
+                {'icon': '🏃', 'title': 'Dynamic Content', 'desc': 'The athletic action is well captured in this image.'}
+            ]
+
+        # Display suggestions (limit to 1)
+        for suggestion in suggestions[:1]:
+            suggestion_widget = QWidget()
+            suggestion_widget.setStyleSheet("""
+                background: #f8f9fa;
+                border-radius: 8px;
+                padding: 15px;
+                border-left: 4px solid #4CAF50;
+                margin: 5px 0px;
+                min-height: 80px;
+            """)
+
+            suggestion_layout = QHBoxLayout(suggestion_widget)
+            suggestion_layout.setSpacing(10)
+
+            # Icon
+            icon_label = QLabel(suggestion['icon'])
+            icon_label.setStyleSheet("font-size: 32px; background: transparent; border: none;")
+            icon_label.setAlignment(Qt.AlignCenter)
+            icon_label.setFixedSize(80, 80)  # Tăng từ 50x50 lên 60x60
+
+            # Content
+            content_widget = QWidget()
+            content_layout = QVBoxLayout(content_widget)
+            content_layout.setSpacing(2)
+            content_layout.setContentsMargins(0, 0, 0, 0)
+
+            title_label = QLabel(suggestion['title'])
+            title_label.setStyleSheet("font-weight: bold; color: #495057; font-size: 21px;")
+
+            desc_label = QLabel(suggestion['desc'])
+            desc_label.setStyleSheet("color: #495057; font-size: 14px; line-height: 1.4;")
+            desc_label.setWordWrap(True)
+
+            content_layout.addWidget(title_label)
+            content_layout.addWidget(desc_label)
+
+            suggestion_layout.addWidget(icon_label)
+            suggestion_layout.addWidget(content_widget, 1)
+            suggestion_layout.setSpacing(20)  # Tăng từ 15 lên 20
+            suggestion_layout.setContentsMargins(5, 10, 5, 10)  # **THÊM DÒNG NÀY**
+
+            suggestions_layout.addWidget(suggestion_widget)
+
+        # Add both groups to horizontal layout
+        emotion_suggestion_layout.addWidget(emotion_group)
+        emotion_suggestion_layout.addWidget(suggestions_group)
+
+        main_layout.addLayout(emotion_suggestion_layout)
 
         # Thêm stretch để đẩy nội dung lên trên
         main_layout.addStretch()
