@@ -6,9 +6,10 @@ os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QLabel, QFileDialog, QTabWidget, QSplitter,
                              QGraphicsDropShadowEffect, QProgressBar, QComboBox, QMessageBox,
-                             QSizePolicy, QFrame, QScrollArea)
+                             QSizePolicy, QFrame, QScrollArea, QGroupBox, QGridLayout,
+                             QTableWidget, QTableWidgetItem)
+from PyQt5.QtGui import QPixmap, QColor, QBrush
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
-from PyQt5.QtGui import QPixmap, QColor
 from PyQt5.QtWidgets import QListWidget, QListWidgetItem, QGridLayout, QButtonGroup, QRadioButton
 try:
     import qt_material
@@ -1156,147 +1157,390 @@ class SportsAnalysisApp(QMainWindow):
             self.emotion_chart.update_chart({})
 
     def update_stats_tab(self, result):
-        """Cập nhật tab thống kê"""
-        html = """
-        <style>
-            body {font-size: 16px;}
-            .section {margin-bottom: 20px;}
-            .header {font-weight: bold; font-size: 18px; color: #2196F3; margin-bottom: 10px;}
-            table {border-collapse: collapse; width: 100%;}
-            th, td {border: 1px solid #ddd; padding: 8px; text-align: left;}
-            th {background-color: #f2f2f2;}
-        </style>
-        """
+        """Cập nhật tab thống kê với giao diện widget đẹp hơn"""
 
-        # Image Caption
-        if 'caption' in result:
-            html += f"""
-            <div class='section'>
-                <div class='header'>Image Caption</div>
-                <p style='font-size: 18px; padding: 15px; background-color: #f0f0f0; border-radius: 10px;'>
-                    {result['caption']}
-                </p>
-            </div>
-            """
+        # Xóa layout cũ nếu có
+        if self.tab_stats.layout():
+            QWidget().setLayout(self.tab_stats.layout())
 
-        # General Information
-        html += "<div class='section'><div class='header'>General Information</div>"
+        # Tạo layout chính theo chiều dọc
+        main_layout = QVBoxLayout(self.tab_stats)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(15)
 
-        if 'composition_analysis' in result:
-            comp = result['composition_analysis']
-            html += f"<p><b>Sport type:</b> {comp.get('sport_type', 'Unknown')}</p>"
-            html += f"<p><b>Framing quality:</b> {comp.get('framing_quality', 'Unknown')}</p>"
+        # 1. Summary GroupBox
+        summary_group = QGroupBox("📊 Tổng quan phân tích")
+        summary_group.setStyleSheet("""
+                QGroupBox {
+                    font-weight: bold;
+                    font-size: 21px;
+                    border: 2px solid #2196F3;
+                    border-radius: 8px;
+                    margin-top: 15px;
+                    padding-top: 15px;
+                    background-color: white;
+                }
+                QGroupBox::title {
+                    subcontrol-origin: margin;
+                    subcontrol-position: top left;
+                    left: 15px;
+                    top: -8px;
+                    padding: 10px 8px 4px 8px;
+                    color: #2196F3;
+                    font-size: 21px;
+                    font-weight: bold;
+                    background-color: white;
+                    border: 1px solid #2196F3;
+                    border-radius: 4px;
+                }
+            """)
 
-            # Hiển thị chi tiết framing quality score
-            if 'framing_analysis' in comp and 'overall_score' in comp['framing_analysis']:
-                framing_details = comp['framing_analysis']
-                html += f"""
-                <div style='margin-left: 20px; margin-top: 10px; padding: 10px; background-color: #f8f9fa; border-radius: 5px;'>
-                    <p style='font-weight: bold; color: #2196F3; margin-bottom: 8px;'>Framing Quality Breakdown:</p>
-                    <p><b>Overall Score:</b> {framing_details.get('overall_score', 0):.3f}</p>
-                    <p><b>Position Score:</b> {framing_details.get('position_score', 0):.3f}</p>
-                    <p><b>Size Score:</b> {framing_details.get('size_score', 0):.3f}</p>
-                    <p><b>Breathing Space:</b> {framing_details.get('breathing_score', 0):.3f}</p>
-                    <p><b>Min Margin:</b> {framing_details.get('min_margin', 0):.3f}</p>
-                    <p><b>Rule of Thirds Distance:</b> {framing_details.get('rule_of_thirds_distance', 0):.3f}</p>
-                    <p><b>Center Distance:</b> {framing_details.get('center_distance', 0):.3f}</p>
-                </div>
-                """
+        summary_layout = QGridLayout(summary_group)
+        summary_layout.setContentsMargins(15, 20, 15, 15)
+        summary_layout.setSpacing(10)
 
-        html += f"<p><b>Athletes detected:</b> {result['detections'].get('athletes', 0)}</p>"
+        # Lấy dữ liệu
+        athletes_count = result.get('detections', {}).get('athletes', 0)
+        sport_type = result.get('composition_analysis', {}).get('sport_type', 'Unknown')
+        framing_quality = result.get('composition_analysis', {}).get('framing_quality', 'Unknown')
+        action_quality = result.get('action_analysis', {}).get('action_quality', 'Unknown')
+        action_level = result.get('action_analysis', {}).get('action_level', 0)
 
-        if 'action_analysis' in result:
-            action = result['action_analysis']
-            html += f"<p><b>Action quality:</b> {action.get('action_quality', 'Unknown')} ({action.get('action_level', 0):.2f})</p>"
+        # Tạo labels với style đẹp
+        def create_info_label(title, value, row, col):
+            title_label = QLabel(title)
+            title_label.setStyleSheet("font-weight: bold; color: #495057; font-size: 12px;")
 
-            eq_types = action.get('equipment_types', [])
-            if eq_types:
-                html += f"<p><b>Equipment:</b> {', '.join(eq_types)}</p>"
+            value_label = QLabel(str(value))
+            value_label.setStyleSheet("""
+                background-color: #f8f9fa;
+                padding: 8px 12px;
+                border-radius: 6px;
+                border-left: 4px solid #4CAF50;
+                font-size: 14px;
+                color: #212529;
+            """)
 
-        html += "</div>"
+            summary_layout.addWidget(title_label, row * 2, col)
+            summary_layout.addWidget(value_label, row * 2 + 1, col)
 
-        # Key Subjects Table
+        create_info_label("🏃 Number of athletes:", athletes_count, 0, 0)
+        create_info_label("⚽ Sport type:", sport_type, 0, 1)
+        create_info_label("📷 Framiing quality:", framing_quality, 1, 0)
+        create_info_label("🎯 Action quality:", f"{action_quality} ({action_level:.2f})", 1, 1)
+
+        # Equipment nếu có
+        equipment = result.get('action_analysis', {}).get('equipment_types', [])
+        if equipment:
+            create_info_label("🏈 Equipment:", ', '.join(equipment), 2, 0)
+
+        main_layout.addWidget(summary_group)
+
+        # 2. Object Table GroupBox
         if 'sports_analysis' in result and 'key_subjects' in result['sports_analysis']:
-            html += """
-            <div class='section'>
-                <div class='header'>Key Subjects by Prominence</div>
-                <table>
-                    <tr><th>#</th><th>Class</th><th>Prominence</th><th>Sharpness</th></tr>
-            """
+            key_subjects = result['sports_analysis']['key_subjects']
+            if key_subjects:
+                table_group = QGroupBox("🎯 Subject Analysis Table")
+                table_group.setStyleSheet("""
+                    QGroupBox {
+                        font-weight: bold;
+                        font-size: 21px;
+                        border: 2px solid #FF9800;
+                        border-radius: 8px;
+                        margin-top: 15px;
+                        padding-top: 15px;
+                        background-color: white;
+                    }
+                    QGroupBox::title {
+                        subcontrol-origin: margin;
+                        subcontrol-position: top left;
+                        left: 15px;
+                        top: -8px;
+                        padding: 10px 8px 4px 8px;
+                        color: #FF9800;
+                        font-size: 21px;
+                        font-weight: bold;
+                        background-color: white;
+                        border: 1px solid #FF9800;
+                        border-radius: 4px;
+                    }
+                """)
 
-            for i, subject in enumerate(result['sports_analysis']['key_subjects']):
-                html += f"""
-                <tr>
-                    <td>{i + 1}</td>
-                    <td>{subject['class']}</td>
-                    <td>{subject['prominence']:.2f}</td>
-                    <td>{subject.get('sharpness', 0):.2f}</td>
-                </tr>
-                """
+                table_layout = QVBoxLayout(table_group)
+                table_layout.setContentsMargins(15, 20, 15, 15)
 
-            html += "</table></div>"
+                # Tạo QTableWidget
+                table = QTableWidget()
+                table.setRowCount(len(key_subjects))
+                table.setColumnCount(5)
+                table.setHorizontalHeaderLabels(['ID', 'Subject', 'Prominence', 'Sharpness', 'Status'])
 
+                # Style cho table
+                table.setStyleSheet("""
+                    QTableWidget {
+                        gridline-color: #dee2e6;
+                        background-color: white;
+                        alternate-background-color: #f8f9fa;
+                        selection-background-color: #e3f2fd;
+                        border: 1px solid #dee2e6;
+                        border-radius: 6px;
+                    }
+                    QTableWidget::item {
+                        padding: 8px;
+                        border: none;
+                    }
+                    QHeaderView::section {
+                        background-color: #495057;
+                        color: white;
+                        padding: 10px;
+                        border: none;
+                        font-weight: bold;
+                    }
+                """)
 
-        # Facial Expression Analysis
+                table.setAlternatingRowColors(True)
+                table.setSelectionBehavior(QTableWidget.SelectRows)
+                table.horizontalHeader().setStretchLastSection(True)
+
+                # Điền dữ liệu vào table
+                for i, subject in enumerate(key_subjects):
+                    prominence = subject.get('prominence', 0)
+                    sharpness = subject.get('sharpness', 0)
+
+                    # ID
+                    id_item = QTableWidgetItem(str(i + 1))
+                    id_item.setTextAlignment(Qt.AlignCenter)
+                    table.setItem(i, 0, id_item)
+
+                    # Loại đối tượng
+                    class_item = QTableWidgetItem(subject.get('class', 'Unknown'))
+                    class_item.setTextAlignment(Qt.AlignCenter)
+                    table.setItem(i, 1, class_item)
+
+                    # Điểm nổi bật
+                    prominence_item = QTableWidgetItem(f"{prominence:.3f}")
+                    prominence_item.setTextAlignment(Qt.AlignCenter)
+                    table.setItem(i, 2, prominence_item)
+
+                    # Độ sắc nét
+                    sharpness_item = QTableWidgetItem(f"{sharpness:.3f}")
+                    sharpness_item.setTextAlignment(Qt.AlignCenter)
+                    table.setItem(i, 3, sharpness_item)
+
+                    # Trạng thái với icon và màu
+                    if prominence > 0.7 and sharpness > 0.7:
+                        status_text = "✔️ Excellent"
+                        status_color = QColor(76, 175, 80, 50)  # Xanh lá nhạt
+                    elif prominence > 0.5 and sharpness > 0.5:
+                        status_text = "⚠️ Good"
+                        status_color = QColor(255, 193, 7, 50)  # Vàng nhạt
+                    else:
+                        status_text = "❌ Poor"
+                        status_color = QColor(244, 67, 54, 50)  # Đỏ nhạt
+
+                    status_item = QTableWidgetItem(status_text)
+                    status_item.setTextAlignment(Qt.AlignCenter)
+                    status_item.setBackground(QBrush(status_color))
+                    table.setItem(i, 4, status_item)
+
+                # Tự động điều chỉnh kích thước cột
+                table.resizeColumnsToContents()
+                table.setMinimumHeight(150)
+
+                table_layout.addWidget(table)
+                main_layout.addWidget(table_group)
+
+        # 3. Emotion Block GroupBox
+        emotion_group = QGroupBox("😊 Facial Emotion Analysis")
+        emotion_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                font-size: 21px;
+                border: 2px solid #9C27B0;
+                border-radius: 8px;
+                margin-top: 15px;
+                padding-top: 15px;
+                background-color: white;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                left: 15px;
+                top: -8px;
+                padding: 10px 8px 4px 8px;
+                color: #9C27B0;
+                font-size: 21px;
+                font-weight: bold;
+                background-color: white;
+                border: 1px solid #9C27B0;
+                border-radius: 4px;
+            }
+        """)
+
+        emotion_layout = QVBoxLayout(emotion_group)
+        emotion_layout.setContentsMargins(15, 20, 15, 15)
+        emotion_layout.setSpacing(10)
+
         if 'facial_analysis' in result and result['facial_analysis'].get('has_faces', False):
             facial = result['facial_analysis']
-            html += f"""
-            <div class='section'>
-                <div class='header'>Facial Expression Analysis</div>
-                <p><b>Dominant emotion:</b> {facial.get('dominant_emotion', 'unknown')}</p>
-            """
 
-            if 'original_emotion' in facial and facial['original_emotion'] != facial['dominant_emotion']:
-                html += f"<p><b>Original emotion:</b> {facial['original_emotion']}</p>"
+            # Container cho emotion info
+            emotion_container = QWidget()
+            emotion_container.setStyleSheet("""
+                background: linear-gradient(135deg, #fff3e0, #ffe0b2);
+                border-radius: 8px;
+                padding: 15px;
+                border-left: 4px solid #FF9800;
+            """)
 
-            html += f"""
-                <p><b>Emotion intensity:</b> {facial.get('emotion_intensity', 0):.2f}</p>
-                <p><b>Emotional value:</b> {facial.get('emotional_value', 'Unknown')}</p>
-            </div>
-            """
+            emotion_info_layout = QHBoxLayout(emotion_container)
+            emotion_info_layout.setSpacing(20)
 
-            # Smart Suggestions
-            html += """
-            <div class='section'>
-                <div class='header'>💡 Smart Suggestions</div>
-            """
+            # Icon lớn cho emotion
+            dominant_emotion = facial.get('dominant_emotion', 'unknown')
+            emotion_icons = {
+                'happy': '😊',
+                'sad': '😢',
+                'angry': '😠',
+                'surprise': '😲',
+                'fear': '😨',
+                'disgust': '🤢',
+                'neutral': '😐',
+                'determination': '💪',
+                'focus': '🎯'
+            }
 
-            suggestions = []
+            emotion_icon = emotion_icons.get(dominant_emotion.lower(), '😐')
 
-            # Framing suggestions
-            if 'composition_analysis' in result and 'framing_analysis' in result['composition_analysis']:
-                framing = result['composition_analysis']['framing_analysis']
-                overall_score = framing.get('overall_score', 0)
+            icon_label = QLabel(emotion_icon)
+            icon_label.setStyleSheet("font-size: 48px;")
+            icon_label.setAlignment(Qt.AlignCenter)
+            icon_label.setFixedSize(80, 80)
 
-                if overall_score < 0.6:
-                    suggestions.append("📷 Consider repositioning subject using rule of thirds")
-                    if framing.get('min_margin', 0) < 0.1:
-                        suggestions.append("📏 Give subject more breathing space from edges")
+            # Thông tin emotion
+            emotion_info = QWidget()
+            emotion_detail_layout = QVBoxLayout(emotion_info)
+            emotion_detail_layout.setSpacing(5)
 
-            # Action suggestions
-            if 'action_analysis' in result:
-                action_level = result['action_analysis'].get('action_level', 0)
-                if action_level < 0.4:
-                    suggestions.append("⚡ Try capturing during peak action moments")
+            # Tên emotion
+            emotion_name = QLabel(dominant_emotion.title())
+            emotion_name.setStyleSheet("font-size: 20px; font-weight: bold; color: #495057;")
 
-            # Technical suggestions
-            if 'sports_analysis' in result and 'sharpness_scores' in result['sports_analysis']:
-                avg_sharpness = sum(result['sports_analysis']['sharpness_scores']) / len(
-                    result['sports_analysis']['sharpness_scores'])
-                if avg_sharpness < 0.6:
-                    suggestions.append("🔍 Consider faster shutter speed for sharper images")
+            emotion_subtitle = QLabel("Emotion")
+            emotion_subtitle.setStyleSheet("color: #6c757d; font-size: 12px;")
 
-            if suggestions:
-                for suggestion in suggestions:
-                    html += f"<p style='margin: 5px 0; padding: 8px; background-color: #fff3cd; border-left: 4px solid #ffc107; border-radius: 4px;'>{suggestion}</p>"
-            else:
-                html += "<p style='color: #4CAF50;'>✅ Excellent photo! No major improvements needed.</p>"
+            emotion_detail_layout.addWidget(emotion_name)
+            emotion_detail_layout.addWidget(emotion_subtitle)
 
-            html += "</div>"
+            # Metrics
+            emotion_intensity = facial.get('emotion_intensity', 0)
+            emotional_value = facial.get('emotional_value', 'Unknown')
 
-            self.stats_label.setText(html)
+            metrics_layout = QHBoxLayout()
 
-        self.stats_label.setText(html)
+            # Intensity metric
+            intensity_widget = QWidget()
+            intensity_widget.setStyleSheet("""
+                background: white;
+                border-radius: 6px;
+                padding: 10px;
+                border: 1px solid #dee2e6;
+            """)
+            intensity_layout = QVBoxLayout(intensity_widget)
+            intensity_layout.setAlignment(Qt.AlignCenter)
+            intensity_layout.setSpacing(2)
+
+            intensity_value = QLabel(f"{emotion_intensity:.2f}")
+            intensity_value.setStyleSheet("font-size: 18px; font-weight: bold; color: #2196F3;")
+            intensity_value.setAlignment(Qt.AlignCenter)
+
+            intensity_label = QLabel("Intensity")
+            intensity_label.setStyleSheet("font-size: 10px; color: #6c757d; text-transform: uppercase;")
+            intensity_label.setAlignment(Qt.AlignCenter)
+
+            intensity_layout.addWidget(intensity_value)
+            intensity_layout.addWidget(intensity_label)
+
+            # Value metric
+            value_widget = QWidget()
+            value_widget.setStyleSheet("""
+                background: white;
+                border-radius: 6px;
+                padding: 10px;
+                border: 1px solid #dee2e6;
+            """)
+            value_layout = QVBoxLayout(value_widget)
+            value_layout.setAlignment(Qt.AlignCenter)
+            value_layout.setSpacing(2)
+
+            value_value = QLabel(emotional_value)
+            value_value.setStyleSheet("font-size: 18px; font-weight: bold; color: #2196F3;")
+            value_value.setAlignment(Qt.AlignCenter)
+
+            value_label = QLabel("Emotion Value")
+            value_label.setStyleSheet("font-size: 10px; color: #6c757d; text-transform: uppercase;")
+            value_label.setAlignment(Qt.AlignCenter)
+
+            value_layout.addWidget(value_value)
+            value_layout.addWidget(value_label)
+
+            metrics_layout.addWidget(intensity_widget)
+            metrics_layout.addWidget(value_widget)
+
+            emotion_detail_layout.addLayout(metrics_layout)
+
+            emotion_info_layout.addWidget(icon_label)
+            emotion_info_layout.addWidget(emotion_info, 1)
+
+            emotion_layout.addWidget(emotion_container)
+
+            # Original emotion nếu khác
+            if 'original_emotion' in facial and facial['original_emotion'] != dominant_emotion:
+                original_widget = QWidget()
+                original_widget.setStyleSheet("""
+                    background: rgba(255,193,7,0.1);
+                    border-radius: 5px;
+                    padding: 10px;
+                    border: 1px solid #FFC107;
+                """)
+                original_layout = QHBoxLayout(original_widget)
+
+                original_label = QLabel(f"Orignial Emotion: {facial['original_emotion']}")
+                original_label.setStyleSheet("font-weight: bold; color: #495057;")
+
+                original_layout.addWidget(original_label)
+                emotion_layout.addWidget(original_widget)
+
+        else:
+            # Không phát hiện được khuôn mặt
+            no_face_widget = QWidget()
+            no_face_widget.setStyleSheet("""
+                background: #f8f9fa;
+                border-radius: 8px;
+                padding: 30px;
+                border: 2px dashed #dee2e6;
+            """)
+
+            no_face_layout = QVBoxLayout(no_face_widget)
+            no_face_layout.setAlignment(Qt.AlignCenter)
+
+            no_face_icon = QLabel("😔")
+            no_face_icon.setStyleSheet("font-size: 48px;")
+            no_face_icon.setAlignment(Qt.AlignCenter)
+
+            no_face_text = QLabel("No faces detected")
+            no_face_text.setStyleSheet("font-size: 16px; color: #6c757d; font-style: italic;")
+            no_face_text.setAlignment(Qt.AlignCenter)
+
+            no_face_layout.addWidget(no_face_icon)
+            no_face_layout.addWidget(no_face_text)
+
+            emotion_layout.addWidget(no_face_widget)
+
+        main_layout.addWidget(emotion_group)
+
+        # Thêm stretch để đẩy nội dung lên trên
+        main_layout.addStretch()
 
     def change_theme(self, index):
         """Thay đổi chủ đề của ứng dụng"""

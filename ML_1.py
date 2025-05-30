@@ -2650,6 +2650,7 @@ def visualize_sports_results(img_data, detections, depth_map, sports_analysis, a
         label = detections['classes'][i]
         conf = detections['scores'][i]
         sharpness = sharpness_scores[i] if i < len(sharpness_scores) else 0
+        object_id = i + 1
 
         # Determine if this is the main person
         is_main_person = False
@@ -2670,8 +2671,8 @@ def visualize_sports_results(img_data, detections, depth_map, sports_analysis, a
                 # Vẽ spotlight effect xung quanh người chính
                 cv2.rectangle(main_obj_viz, (x1 - 5, y1 - 5), (x2 + 5, y2 + 5), (0, 255, 255), 8)
 
-                # Thêm tên nhãn nổi bật hơn
-                cv2.putText(main_obj_viz, "MAIN SUBJECT", (x1, y1 - 25),
+                # Thêm tên nhãn nổi bật hơn với ID
+                cv2.putText(main_obj_viz, f"ID:{object_id} MAIN SUBJECT", (x1, y1 - 25),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
             else:
                 color = (0, 255, 0)  # Green for other people
@@ -2690,7 +2691,7 @@ def visualize_sports_results(img_data, detections, depth_map, sports_analysis, a
 
         # Draw label with sharpness
         label_y = y1 - 10 if y1 > 20 else y1 + 20
-        cv2.putText(det_viz, f"{label} {conf:.2f} S:{sharpness:.2f}", (x1, label_y),
+        cv2.putText(det_viz, f"ID:{object_id} {label} {conf:.2f} S:{sharpness:.2f}", (x1, label_y),
                     cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, 2)
 
     # Tạo hiệu ứng làm mờ hình nền và làm nổi bật đối tượng chính
@@ -2758,6 +2759,7 @@ def visualize_sports_results(img_data, detections, depth_map, sports_analysis, a
 
             # Xác định nếu là đối tượng chính (người)
             is_main_subject = (idx == main_person_idx)
+            subject_id = idx + 1
 
             if is_main_subject:
                 # Highlight đối tượng chính với màu nổi bật
@@ -2771,10 +2773,10 @@ def visualize_sports_results(img_data, detections, depth_map, sports_analysis, a
 
             cv2.rectangle(comp_viz, (x1, y1), (x2, y2), color, thickness)
 
-            # Hiển thị điểm sắc nét và chỉ số prominence
-            label_text = f"P:{subject['prominence']:.2f} S:{subject.get('sharpness', 0):.2f}"
+            # Hiển thị ID, điểm sắc nét và chỉ số prominence
+            label_text = f"ID:{subject_id} P:{subject['prominence']:.2f} S:{subject.get('sharpness', 0):.2f}"
             if is_main_subject:
-                label_text = "MAIN: " + label_text
+                label_text = f"ID:{subject_id} MAIN P:{subject['prominence']:.2f} S:{subject.get('sharpness', 0):.2f}"
 
             cv2.putText(comp_viz, label_text,
                         (x1, y2 + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
