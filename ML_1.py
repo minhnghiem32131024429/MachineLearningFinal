@@ -2285,6 +2285,10 @@ def visualize_emotion_results(face_img, emotion_analysis):
     return img_data
 
 
+def create_caption_visualization(caption, width):
+    pass
+
+
 def visualize_sports_results(img_data, detections, depth_map, sports_analysis, action_analysis, composition_analysis,
                              facial_analysis=None, caption=None):
     """Create sports-specific visualization with enhanced main subject highlighting, emotion analysis and caption"""
