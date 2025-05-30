@@ -1,44 +1,26 @@
 import sys
 import os
-import numpy as np
-from ML_1 import generate_sports_caption
-# Đặt biến môi trường trước khi import các thư viện khác
+from ML_1 import generate_sports_caption, analyze_sports_image
+ML_IMPORT_SUCCESS = True
 os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
-
-# Import PyQt trước qt_material
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QLabel, QFileDialog, QTabWidget, QSplitter,
                              QGraphicsDropShadowEffect, QProgressBar, QComboBox, QMessageBox,
                              QSizePolicy, QFrame, QScrollArea)
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QSize, QUrl, QDir
-from PyQt5.QtGui import QPixmap, QImage, QColor, QFont, QIcon, QFontDatabase
-
-# Bây giờ mới import qt_material
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5.QtGui import QPixmap, QColor
+from PyQt5.QtWidgets import QListWidget, QListWidgetItem, QGridLayout, QButtonGroup, QRadioButton
 try:
     import qt_material
     QT_MATERIAL_AVAILABLE = True
 except ImportError:
     QT_MATERIAL_AVAILABLE = False
     print("Warning: qt_material not found. Install it with: pip install qt-material")
-
-# Thiết lập matplotlib để sử dụng với PyQt
 import matplotlib
-
 matplotlib.use('Qt5Agg')
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
-# Nhập file phân tích ảnh
-try:
-    from ML_1 import analyze_sports_image
-
-    ML_IMPORT_SUCCESS = True
-except ImportError:
-    ML_IMPORT_SUCCESS = False
-    print("Warning: ML_1.py not found or missing analyze_sports_image function")
-
-
-# Thread để phân tích ảnh không đông cứng UI
 class AnalysisThread(QThread):
     finished = pyqtSignal(dict)
     progress = pyqtSignal(int)
@@ -53,69 +35,64 @@ class AnalysisThread(QThread):
             # Mô phỏng tiến trình xử lý
             for i in range(0, 101, 10):
                 self.progress.emit(i)
-                self.msleep(100)  # Giả lập xử lý
+                self.msleep(100)
 
             # Gọi hàm phân tích từ ML_1.py
-            if ML_IMPORT_SUCCESS:
-                try:
-                    result = analyze_sports_image(self.image_path)
-                    self.finished.emit(result)
-                except Exception as e:
-                    print(f"Error in analyze_sports_image: {str(e)}")
-                    # Nếu phân tích thất bại, sử dụng mẫu
-                    mock_result = self.generate_mock_result()
-                    self.finished.emit(mock_result)
-            else:
-                # Mẫu kết quả phân tích giả nếu không tìm thấy ML_1.py
-                mock_result = self.generate_mock_result()
-                self.finished.emit(mock_result)
+            result = analyze_sports_image(self.image_path)
+            self.finished.emit(result)
 
         except Exception as e:
             self.error.emit(str(e))
 
+
+class BatchAnalysisThread(QThread):
+    progress = pyqtSignal(int, int)  # (current, total)
+    image_completed = pyqtSignal(str, dict, str)  # (image_path, result, caption)
+    error = pyqtSignal(str, str)  # (image_path, error_message)
+    finished = pyqtSignal()
+
+    def __init__(self, image_paths):
+        super().__init__()
+        self.image_paths = image_paths
+
+    def run(self):
+        try:
+            for i, image_path in enumerate(self.image_paths):
+                try:
+                    # Phân tích ảnh
+                    if ML_IMPORT_SUCCESS:
+                        result = analyze_sports_image(image_path)
+                    else:
+                        result = self.generate_mock_result()
+
+                    # Tạo caption
+                    caption = generate_sports_caption(result)
+
+                    # Emit kết quả
+                    self.image_completed.emit(image_path, result, caption)
+
+                except Exception as e:
+                    self.error.emit(image_path, str(e))
+
+                # Cập nhật progress
+                self.progress.emit(i + 1, len(self.image_paths))
+
+            self.finished.emit()
+
+        except Exception as e:
+            self.error.emit("", f"Batch processing error: {str(e)}")
+
     def generate_mock_result(self):
-        """Tạo kết quả giả nếu ML_1.py không được tìm thấy"""
-        mock_result = {
-            'detections': {'athletes': 3, 'classes': ['person', 'person', 'person', 'sports ball'], 'boxes': [],
-                           'scores': []},
-            'sports_analysis': {
-                'player_dispersion': 0.65,
-                'key_subjects': [
-                    {'class': 'person', 'prominence': 0.92, 'sharpness': 0.85, 'box': [100, 100, 300, 500]},
-                    {'class': 'person', 'prominence': 0.78, 'sharpness': 0.75, 'box': [400, 200, 550, 550]},
-                    {'class': 'sports ball', 'prominence': 0.65, 'sharpness': 0.9, 'box': [320, 380, 350, 410]}
-                ],
-                'sharpness_scores': [0.85, 0.75, 0.9]
-            },
-            'action_analysis': {
-                'action_level': 0.82,
-                'action_quality': 'High',
-                'equipment_types': ['sports ball']
-            },
-            'composition_analysis': {
-                'sport_type': 'Soccer',
-                'framing_quality': 'Good',
-                'recommended_crop': {'shift_x': 0.05, 'shift_y': -0.02}
-            },
-            'facial_analysis': {
-                'has_faces': True,
-                'dominant_emotion': 'happy',
-                'emotion_intensity': 0.85,
-                'emotional_value': 'High',
-                'emotion_scores': {
-                    'happy': 0.85,
-                    'neutral': 0.08,
-                    'sad': 0.02,
-                    'angry': 0.01,
-                    'surprise': 0.03,
-                    'fear': 0.01
-                }
-            }
+        """Tạo kết quả giả cho batch processing"""
+        return {
+            'detections': {'athletes': 2, 'classes': ['person', 'person'], 'boxes': [], 'scores': []},
+            'sports_analysis': {'player_dispersion': 0.7, 'key_subjects': [], 'sharpness_scores': []},
+            'action_analysis': {'action_level': 0.8, 'action_quality': 'High', 'equipment_types': []},
+            'composition_analysis': {'sport_type': 'Unknown', 'framing_quality': 'Good'},
+            'facial_analysis': {'has_faces': False}
         }
-        return mock_result
 
 
-# Biểu đồ cảm xúc dùng Matplotlib
 class EmotionChart(FigureCanvas):
     def __init__(self, parent=None, width=5, height=4, dpi=100):
         # Tạo figure trước khi gọi parent's __init__
@@ -170,7 +147,6 @@ class EmotionChart(FigureCanvas):
         self.draw()
 
 
-# Tạo widget hiển thị ảnh với scroll và zoom
 class ImageDisplayWidget(QWidget):
     def __init__(self, title="Image", parent=None):
         super().__init__(parent)
@@ -235,7 +211,128 @@ class ImageDisplayWidget(QWidget):
             self.image_label.setPixmap(scaled_pixmap)
 
 
-# Class chính của ứng dụng
+class BatchResultWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.init_ui()
+        self.results = []
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+
+        # Header
+        header = QLabel("Batch Processing Results")
+        header.setStyleSheet("font-size: 18px; font-weight: bold; margin-bottom: 10px;")
+        layout.addWidget(header)
+
+        # Scroll area chứa kết quả
+        self.scroll_area = QScrollArea()
+        self.scroll_content = QWidget()
+        self.scroll_layout = QVBoxLayout(self.scroll_content)
+        self.scroll_layout.setSpacing(10)
+
+        self.scroll_area.setWidget(self.scroll_content)
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setStyleSheet("border: none;")
+
+        layout.addWidget(self.scroll_area)
+
+    def add_result(self, image_path, caption, result=None):
+        # Tạo card cho mỗi kết quả
+        result_card = QWidget()
+        result_card.setStyleSheet("""
+            QWidget {
+                background-color: white;
+                border-radius: 10px;
+                padding: 15px;
+                margin: 5px;
+                border: 1px solid #ddd;
+            }
+        """)
+
+        card_layout = QHBoxLayout(result_card)
+
+        # Ảnh thumbnail
+        image_label = QLabel()
+        try:
+            pixmap = QPixmap(image_path)
+            thumbnail = pixmap.scaled(150, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            image_label.setPixmap(thumbnail)
+        except:
+            image_label.setText("Error loading image")
+
+        image_label.setMinimumSize(150, 150)
+        image_label.setAlignment(Qt.AlignCenter)
+        image_label.setStyleSheet("border: 1px solid #ccc; border-radius: 5px;")
+
+        # Thông tin
+        info_layout = QVBoxLayout()
+
+        # Tên file
+        filename = os.path.basename(image_path)
+        filename_label = QLabel(f"<b>{filename}</b>")
+        filename_label.setStyleSheet("font-size: 14px; margin-bottom: 5px;")
+
+        # Caption
+        caption_label = QLabel(caption)
+        caption_label.setWordWrap(True)
+        caption_label.setStyleSheet("""
+            font-size: 13px; 
+            padding: 10px; 
+            background-color: #f8f9fa; 
+            border-radius: 5px;
+            border-left: 3px solid #2196F3;
+        """)
+
+        info_layout.addWidget(filename_label)
+        info_layout.addWidget(caption_label)
+        info_layout.addStretch()
+
+        card_layout.addWidget(image_label)
+        card_layout.addLayout(info_layout, 1)
+
+        self.scroll_layout.addWidget(result_card)
+
+        # Lưu kết quả
+        self.results.append({
+            'path': image_path,
+            'caption': caption,
+            'result': result
+        })
+
+    def clear_results(self):
+        # Xóa tất cả widget con
+        for i in reversed(range(self.scroll_layout.count())):
+            child = self.scroll_layout.itemAt(i).widget()
+            if child:
+                child.setParent(None)
+
+        self.results.clear()
+
+    def export_results(self):
+        if not self.results:
+            return
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Export Results", "batch_results.txt", "Text Files (*.txt)"
+        )
+
+        if file_path:
+            try:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write("Batch Processing Results\n")
+                    f.write("=" * 50 + "\n\n")
+
+                    for i, result in enumerate(self.results, 1):
+                        f.write(f"{i}. File: {os.path.basename(result['path'])}\n")
+                        f.write(f"   Caption: {result['caption']}\n\n")
+
+                QMessageBox.information(self, "Export Complete", f"Results exported to {file_path}")
+
+            except Exception as e:
+                QMessageBox.critical(self, "Export Error", f"Could not export results: {str(e)}")
+
+
 class SportsAnalysisApp(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -255,6 +352,7 @@ class SportsAnalysisApp(QMainWindow):
         # Biến để lưu dữ liệu
         self.current_image_path = None
         self.analysis_results = None
+        self.batch_images = []
 
     def init_ui(self):
         # Widget & layout chính
@@ -317,7 +415,27 @@ class SportsAnalysisApp(QMainWindow):
         upload_title.setStyleSheet("font-size: 18px; font-weight: bold; margin-bottom: 10px;")
         upload_layout.addWidget(upload_title)
 
-        # Ảnh xem trước
+        # **THÊM VÀO SAU upload_title:**
+        # Mode selection - Chọn chế độ xử lý
+        mode_layout = QHBoxLayout()
+        self.mode_group = QButtonGroup()
+
+        self.single_mode = QRadioButton("Single Image")
+        self.batch_mode = QRadioButton("Batch Processing")
+        self.single_mode.setChecked(True)
+
+        self.mode_group.addButton(self.single_mode, 0)
+        self.mode_group.addButton(self.batch_mode, 1)
+        self.mode_group.buttonClicked.connect(self.mode_changed)
+
+        mode_layout.addWidget(self.single_mode)
+        mode_layout.addWidget(self.batch_mode)
+        mode_layout.addStretch()
+
+        upload_layout.addLayout(mode_layout)
+        # **KẾT THÚC THÊM**
+
+        # Ảnh xem trước (for single mode)
         self.preview_image = QLabel("No image selected")
         self.preview_image.setAlignment(Qt.AlignCenter)
         self.preview_image.setStyleSheet("""
@@ -331,6 +449,29 @@ class SportsAnalysisApp(QMainWindow):
         self.preview_image.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         upload_layout.addWidget(self.preview_image)
 
+        # **THÊM VÀO SAU preview_image:**
+        # Batch image list (ẩn ban đầu)
+        self.batch_list = QListWidget()
+        self.batch_list.setMinimumHeight(300)
+        self.batch_list.setVisible(False)
+        self.batch_list.setStyleSheet("""
+            QListWidget {
+                background-color: rgba(0, 0, 0, 0.05);
+                border-radius: 10px;
+                padding: 10px;
+                font-size: 14px;
+            }
+            QListWidget::item {
+                padding: 5px;
+                border-bottom: 1px solid #ddd;
+            }
+            QListWidget::item:hover {
+                background-color: #e3f2fd;
+            }
+        """)
+        upload_layout.addWidget(self.batch_list)
+        # **KẾT THÚC THÊM**
+
         # Nút tải lên
         upload_btn_layout = QHBoxLayout()
         self.upload_btn = QPushButton("Browse Images...")
@@ -343,6 +484,26 @@ class SportsAnalysisApp(QMainWindow):
         """)
         self.upload_btn.clicked.connect(self.open_image)
         upload_btn_layout.addWidget(self.upload_btn)
+
+        # **THÊM VÀO SAU upload_btn:**
+        # Clear batch button (ẩn ban đầu)
+        self.clear_batch_btn = QPushButton("Clear List")
+        self.clear_batch_btn.setMinimumHeight(50)
+        self.clear_batch_btn.setVisible(False)
+        self.clear_batch_btn.setStyleSheet("""
+            QPushButton {
+                font-size: 14px;
+                background-color: #f44336;
+                color: white;
+            }
+            QPushButton:hover {
+                background-color: #d32f2f;
+            }
+        """)
+        self.clear_batch_btn.clicked.connect(self.clear_batch_list)
+        upload_btn_layout.addWidget(self.clear_batch_btn)
+        # **KẾT THÚC THÊM**
+
         upload_layout.addLayout(upload_btn_layout)
 
         left_layout.addWidget(upload_card)
@@ -465,14 +626,14 @@ class SportsAnalysisApp(QMainWindow):
         tab_face_layout.addWidget(face_content)
         self.tabs.addTab(self.tab_face, "Facial Expression")
 
-        # Tab 8: Pose Estimation (Thêm MỚI)
+        # Tab 8: Pose Estimation
         self.tab_pose = QWidget()
         tab_pose_layout = QVBoxLayout(self.tab_pose)
         self.pose_image_display = ImageDisplayWidget("Pose Estimation")
         tab_pose_layout.addWidget(self.pose_image_display)
         self.tabs.addTab(self.tab_pose, "Pose")
 
-        # Tab 8: Thống kê
+        # Tab 9: Statistics
         self.tab_stats = QWidget()
         tab_stats_layout = QVBoxLayout(self.tab_stats)
 
@@ -497,6 +658,45 @@ class SportsAnalysisApp(QMainWindow):
 
         tab_stats_layout.addWidget(stats_scroll)
         self.tabs.addTab(self.tab_stats, "Statistics")
+
+        # **THÊM VÀO SAU tab Statistics:**
+        # Tab 10: Batch Results (ẩn ban đầu)
+        self.tab_batch = QWidget()
+        tab_batch_layout = QVBoxLayout(self.tab_batch)
+
+        # Header cho Batch Results với export button
+        batch_header_layout = QHBoxLayout()
+        batch_title = QLabel("Batch Processing Results")
+        batch_title.setStyleSheet("font-size: 18px; font-weight: bold; color: #2196F3;")
+        batch_header_layout.addWidget(batch_title)
+        batch_header_layout.addStretch()
+
+        self.export_btn = QPushButton("Export Results")
+        self.export_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 8px 16px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        self.export_btn.clicked.connect(self.export_batch_results)
+        batch_header_layout.addWidget(self.export_btn)
+
+        tab_batch_layout.addLayout(batch_header_layout)
+
+        # Batch results widget
+        self.batch_results = BatchResultWidget()
+        tab_batch_layout.addWidget(self.batch_results)
+
+        self.batch_tab_index = self.tabs.addTab(self.tab_batch, "Batch Results")
+        self.tabs.setTabVisible(self.batch_tab_index, False)  # Ẩn ban đầu
+        # **KẾT THÚC THÊM**
 
         right_layout.addWidget(self.tabs)
 
@@ -534,51 +734,137 @@ class SportsAnalysisApp(QMainWindow):
 
     def open_image(self):
         """Mở hộp thoại chọn ảnh"""
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Open Image", "", "Image Files (*.jpg *.jpeg *.png *.bmp)"
-        )
+        if self.batch_mode.isChecked():
+            # Batch mode - chọn nhiều ảnh
+            file_paths, _ = QFileDialog.getOpenFileNames(
+                self, "Select Images", "", "Image Files (*.jpg *.jpeg *.png *.bmp)"
+            )
 
-        if file_path:
-            try:
-                # Hiển thị ảnh xem trước
-                pixmap = QPixmap(file_path)
-                pixmap = pixmap.scaled(self.preview_image.width(), 300, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                self.preview_image.setPixmap(pixmap)
+            if file_paths:
+                for file_path in file_paths:
+                    # Kiểm tra xem ảnh đã có trong list chưa
+                    items = [self.batch_list.item(i).text() for i in range(self.batch_list.count())]
+                    filename = os.path.basename(file_path)
 
-                # Hiển thị ảnh gốc trong tab original
-                original_pixmap = QPixmap(file_path)
-                self.original_image_display.set_image(original_pixmap)
+                    if file_path not in items:
+                        item = QListWidgetItem(file_path)
+                        item.setText(filename)
+                        item.setToolTip(file_path)
+                        self.batch_list.addItem(item)
 
-                # Lưu đường dẫn ảnh
-                self.current_image_path = file_path
+                # Enable analyze button nếu có ảnh
+                self.analyze_btn.setEnabled(self.batch_list.count() > 0)
 
-                # Cho phép phân tích
-                self.analyze_btn.setEnabled(True)
+                self.statusBar().showMessage(f"Added {len(file_paths)} images. Total: {self.batch_list.count()}")
+        else:
+            # Single mode - chọn một ảnh
+            file_path, _ = QFileDialog.getOpenFileName(
+                self, "Open Image", "", "Image Files (*.jpg *.jpeg *.png *.bmp)"
+            )
 
-                filename = os.path.basename(file_path)
-                self.statusBar().showMessage(f"Loaded image: {filename}")
+            if file_path:
+                try:
+                    # Hiển thị ảnh xem trước
+                    pixmap = QPixmap(file_path)
+                    pixmap = pixmap.scaled(self.preview_image.width(), 300, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                    self.preview_image.setPixmap(pixmap)
 
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Could not open image: {str(e)}")
+                    # Hiển thị ảnh gốc trong tab original
+                    original_pixmap = QPixmap(file_path)
+                    self.original_image_display.set_image(original_pixmap)
+
+                    # Lưu đường dẫn ảnh
+                    self.current_image_path = file_path
+
+                    # Cho phép phân tích
+                    self.analyze_btn.setEnabled(True)
+
+                    filename = os.path.basename(file_path)
+                    self.statusBar().showMessage(f"Loaded image: {filename}")
+
+                except Exception as e:
+                    QMessageBox.critical(self, "Error", f"Could not open image: {str(e)}")
 
     def start_analysis(self):
-        """Bắt đầu phân tích ảnh trong luồng riêng biệt"""
-        if not self.current_image_path:
-            return
+        """Bắt đầu phân tích ảnh"""
+        if self.batch_mode.isChecked():
+            # Batch processing
+            if self.batch_list.count() == 0:
+                return
 
-        # Vô hiệu hóa nút và hiện progress bar
-        self.analyze_btn.setEnabled(False)
-        self.upload_btn.setEnabled(False)
-        self.progress_bar.setValue(0)
-        self.progress_bar.setVisible(True)
-        self.statusBar().showMessage("Analyzing image...")
+            # Lấy danh sách đường dẫn
+            image_paths = []
+            for i in range(self.batch_list.count()):
+                item = self.batch_list.item(i)
+                image_paths.append(item.toolTip())  # toolTip chứa đường dẫn đầy đủ
 
-        # Tạo và bắt đầu thread
-        self.analysis_thread = AnalysisThread(self.current_image_path)
-        self.analysis_thread.progress.connect(self.update_progress)
-        self.analysis_thread.finished.connect(self.analysis_finished)
-        self.analysis_thread.error.connect(self.analysis_error)
-        self.analysis_thread.start()
+            # Clear previous results
+            self.batch_results.clear_results()
+
+            # Khởi động batch analysis
+            self.analyze_btn.setEnabled(False)
+            self.upload_btn.setEnabled(False)
+            self.clear_batch_btn.setEnabled(False)
+            self.progress_bar.setValue(0)
+            self.progress_bar.setVisible(True)
+            self.statusBar().showMessage("Starting batch analysis...")
+
+            # Tạo và bắt đầu batch thread
+            self.batch_thread = BatchAnalysisThread(image_paths)
+            self.batch_thread.progress.connect(self.update_batch_progress)
+            self.batch_thread.image_completed.connect(self.batch_image_completed)
+            self.batch_thread.error.connect(self.batch_image_error)
+            self.batch_thread.finished.connect(self.batch_analysis_finished)
+            self.batch_thread.start()
+
+        else:
+            # Single image processing (existing code)
+            if not self.current_image_path:
+                return
+
+            # Vô hiệu hóa nút và hiện progress bar
+            self.analyze_btn.setEnabled(False)
+            self.upload_btn.setEnabled(False)
+            self.progress_bar.setValue(0)
+            self.progress_bar.setVisible(True)
+            self.statusBar().showMessage("Analyzing image...")
+
+            # Tạo và bắt đầu thread
+            self.analysis_thread = AnalysisThread(self.current_image_path)
+            self.analysis_thread.progress.connect(self.update_progress)
+            self.analysis_thread.finished.connect(self.analysis_finished)
+            self.analysis_thread.error.connect(self.analysis_error)
+            self.analysis_thread.start()
+
+    def update_batch_progress(self, current, total):
+        """Cập nhật tiến trình batch"""
+        progress = int((current / total) * 100)
+        self.progress_bar.setValue(progress)
+        self.statusBar().showMessage(f"Processing image {current}/{total}...")
+
+    def batch_image_completed(self, image_path, result, caption):
+        """Xử lý khi một ảnh trong batch hoàn thành"""
+        self.batch_results.add_result(image_path, caption, result)
+
+    def batch_image_error(self, image_path, error_message):
+        """Xử lý lỗi trong batch processing"""
+        filename = os.path.basename(image_path) if image_path else "Unknown"
+        error_caption = f"Error processing image: {error_message}"
+        self.batch_results.add_result(image_path, error_caption)
+
+    def batch_analysis_finished(self):
+        """Xử lý khi batch analysis hoàn thành"""
+        # Kích hoạt lại các nút
+        self.analyze_btn.setEnabled(True)
+        self.upload_btn.setEnabled(True)
+        self.clear_batch_btn.setEnabled(True)
+        self.progress_bar.setVisible(False)
+
+        total_images = self.batch_list.count()
+        self.statusBar().showMessage(f"Batch analysis complete. Processed {total_images} images.")
+
+        # Chuyển đến tab batch results
+        self.tabs.setCurrentIndex(self.batch_tab_index)
 
     def update_progress(self, value):
         """Cập nhật tiến trình phân tích"""
@@ -773,21 +1059,30 @@ class SportsAnalysisApp(QMainWindow):
 
     def update_stats_tab(self, result):
         """Cập nhật tab thống kê"""
-        html = "<style>body {font-size: 16px;} .section {margin-bottom: 20px;} .header {font-weight: bold; font-size: 18px; color: #2196F3; margin-bottom: 10px;} table {border-collapse: collapse;} </style>"
+        html = """
+        <style>
+            body {font-size: 16px;}
+            .section {margin-bottom: 20px;}
+            .header {font-weight: bold; font-size: 18px; color: #2196F3; margin-bottom: 10px;}
+            table {border-collapse: collapse; width: 100%;}
+            th, td {border: 1px solid #ddd; padding: 8px; text-align: left;}
+            th {background-color: #f2f2f2;}
+        </style>
+        """
 
-        # Thêm phần caption (thêm vào đây)
+        # Image Caption
         if 'caption' in result:
-            html += "<div class='section'>"
-            html += "<div class='header'>Image Caption</div>"
-            html += f"<p style='font-size: 18px; padding: 15px; background-color: #f0f0f0; border-radius: 10px;'>{result['caption']}</p>"
-            html += "</div>"
+            html += f"""
+            <div class='section'>
+                <div class='header'>Image Caption</div>
+                <p style='font-size: 18px; padding: 15px; background-color: #f0f0f0; border-radius: 10px;'>
+                    {result['caption']}
+                </p>
+            </div>
+            """
 
-        # Tiếp tục code hiện tại...
-        # Thông tin cơ bản
-        html += "<div class='section'>"
-        html += "<div class='header'>General Information</div>"
-
-        # [Code còn lại giữ nguyên]
+        # General Information
+        html += "<div class='section'><div class='header'>General Information</div>"
 
         if 'composition_analysis' in result:
             comp = result['composition_analysis']
@@ -803,36 +1098,47 @@ class SportsAnalysisApp(QMainWindow):
             eq_types = action.get('equipment_types', [])
             if eq_types:
                 html += f"<p><b>Equipment:</b> {', '.join(eq_types)}</p>"
+
         html += "</div>"
 
-        # Key subjects
+        # Key Subjects Table
         if 'sports_analysis' in result and 'key_subjects' in result['sports_analysis']:
-            html += "<div class='section'>"
-            html += "<div class='header'>Key Subjects by Prominence</div>"
-            html += "<table border='1'>"
-            html += "<tr><th>#</th><th>Class</th><th>Prominence</th><th>Sharpness</th></tr>"
+            html += """
+            <div class='section'>
+                <div class='header'>Key Subjects by Prominence</div>
+                <table>
+                    <tr><th>#</th><th>Class</th><th>Prominence</th><th>Sharpness</th></tr>
+            """
 
             for i, subject in enumerate(result['sports_analysis']['key_subjects']):
-                html += f"<tr><td>{i + 1}</td><td>{subject['class']}</td><td>{subject['prominence']:.2f}</td><td>{subject.get('sharpness', 0):.2f}</td></tr>"
+                html += f"""
+                <tr>
+                    <td>{i + 1}</td>
+                    <td>{subject['class']}</td>
+                    <td>{subject['prominence']:.2f}</td>
+                    <td>{subject.get('sharpness', 0):.2f}</td>
+                </tr>
+                """
 
-            html += "</table>"
-            html += "</div>"
+            html += "</table></div>"
 
-        # Facial expression
+        # Facial Expression Analysis
         if 'facial_analysis' in result and result['facial_analysis'].get('has_faces', False):
-            html += "<div class='section'>"
-            html += "<div class='header'>Facial Expression Analysis</div>"
-
             facial = result['facial_analysis']
-            html += f"<p><b>Dominant emotion:</b> {facial.get('dominant_emotion', 'unknown')}</p>"
+            html += f"""
+            <div class='section'>
+                <div class='header'>Facial Expression Analysis</div>
+                <p><b>Dominant emotion:</b> {facial.get('dominant_emotion', 'unknown')}</p>
+            """
 
             if 'original_emotion' in facial and facial['original_emotion'] != facial['dominant_emotion']:
                 html += f"<p><b>Original emotion:</b> {facial['original_emotion']}</p>"
 
-            html += f"<p><b>Emotion intensity:</b> {facial.get('emotion_intensity', 0):.2f}</p>"
-            html += f"<p><b>Emotional value:</b> {facial.get('emotional_value', 'Unknown')}</p>"
-
-            html += "</div>"
+            html += f"""
+                <p><b>Emotion intensity:</b> {facial.get('emotion_intensity', 0):.2f}</p>
+                <p><b>Emotional value:</b> {facial.get('emotional_value', 'Unknown')}</p>
+            </div>
+            """
 
         self.stats_label.setText(html)
 
@@ -865,6 +1171,50 @@ class SportsAnalysisApp(QMainWindow):
         if hasattr(self, 'composition_image_display'):
             self.composition_image_display.update_image_size()
 
+    def mode_changed(self):
+        """Xử lý khi thay đổi mode"""
+        is_batch = self.batch_mode.isChecked()
+
+        # Hiện/ẩn UI elements
+        self.preview_image.setVisible(not is_batch)
+        self.batch_list.setVisible(is_batch)
+        self.clear_batch_btn.setVisible(is_batch)
+
+        # Hiện/ẩn tabs
+        if is_batch:
+            # Ẩn các tab phân tích chi tiết, chỉ hiện batch results
+            for i in range(1, self.batch_tab_index):  # Bỏ qua tab Original và Batch Results
+                self.tabs.setTabVisible(i, False)
+            self.tabs.setTabVisible(self.batch_tab_index, True)
+            self.tabs.setCurrentIndex(self.batch_tab_index)
+        else:
+            # Hiện lại tất cả tabs, ẩn batch results
+            for i in range(1, self.batch_tab_index):
+                self.tabs.setTabVisible(i, True)
+            self.tabs.setTabVisible(self.batch_tab_index, False)
+            self.tabs.setCurrentIndex(0)
+
+        # Update button text
+        if is_batch:
+            self.upload_btn.setText("Add Images...")
+            self.analyze_btn.setText("Analyze Batch")
+        else:
+            self.upload_btn.setText("Browse Images...")
+            self.analyze_btn.setText("Analyze Image")
+
+        # Reset selections
+        self.current_image_path = None
+        self.batch_list.clear()
+        self.analyze_btn.setEnabled(False)
+
+    def clear_batch_list(self):
+        """Xóa danh sách batch"""
+        self.batch_list.clear()
+        self.analyze_btn.setEnabled(False)
+
+    def export_batch_results(self):
+        """Export kết quả batch"""
+        self.batch_results.export_results()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

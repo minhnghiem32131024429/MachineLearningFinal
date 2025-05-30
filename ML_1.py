@@ -1,24 +1,17 @@
 import os
 import traceback
-
 import PIL.Image
-from ultralytics.engine import results
-
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 import torch, cv2, numpy as np, matplotlib.pyplot as plt
 from PIL import Image
 from torchvision import transforms
-from scipy import ndimage
 import time
 import argparse
 import sys
-import matplotlib.patches as patches
-from matplotlib.colors import LinearSegmentedColormap
 import math
 import matplotlib
-matplotlib.use('Agg')  # Sử dụng Agg backend thay vì interactive backend
-# Thêm sau các import hiện có
+matplotlib.use('Agg')
 try:
     import clip
     import torch
@@ -32,7 +25,7 @@ except ImportError:
     print("YOLOv8-Pose không khả dụng. Cài đặt với: pip install ultralytics")
 
 
-# THÊM HÀM này vào ML_1.py, trước hàm analyze_sports_image
+
 def classify_sports_ball_with_clip(image, box, device=None):
     """
     Sử dụng CLIP để phân loại chính xác loại bóng từ vùng đã phát hiện là 'sports ball'
@@ -185,7 +178,7 @@ def detect_faces_improved(image):
         except Exception as e:
             print(f"Lỗi khi tải model: {str(e)}")
             # Sử dụng haar cascade nếu không tải được DNN model
-            return detect_faces_fallback(img_bgr)
+            return []
 
     # Tải model
     try:
@@ -267,121 +260,9 @@ def detect_faces_improved(image):
         print(f"Lỗi khi sử dụng DNN face detector: {str(e)}")
         print(f"Chi tiết: {traceback.format_exc()}")
         # Sử dụng haar cascade nếu DNN gặp lỗi
-        return detect_faces_fallback(img_bgr)
-
-
-def detect_faces_fallback(image):
-    """
-    Phương pháp dự phòng sử dụng Haar Cascade kết hợp với xử lý ảnh
-    để cải thiện khả năng phát hiện người da màu và các góc nghiêng
-    """
-    print("Sử dụng phương pháp dự phòng phát hiện khuôn mặt...")
-
-    # Tạo thư mục cho cascade files
-    cascade_dir = "cascade"
-    os.makedirs(cascade_dir, exist_ok=True)
-
-    # Đường dẫn tới các file cascade
-    cascade_files = {
-        "frontal_face": os.path.join(cascade_dir, "haarcascade_frontalface_default.xml"),
-        "frontal_face_alt": os.path.join(cascade_dir, "haarcascade_frontalface_alt.xml"),
-        "profile_face": os.path.join(cascade_dir, "haarcascade_profileface.xml")
-    }
-
-    # Kiểm tra và sao chép cascade files từ OpenCV nếu chưa có
-    for name, filepath in cascade_files.items():
-        if not os.path.exists(filepath):
-            # Tìm trong thư mục cài đặt OpenCV
-            cv2_path = os.path.dirname(cv2.__file__)
-            cv2_data = os.path.join(cv2_path, 'data')
-
-            # Tên file gốc
-            filename = os.path.basename(filepath)
-            source_path = os.path.join(cv2_data, filename)
-
-            if os.path.exists(source_path):
-                import shutil
-                shutil.copy(source_path, filepath)
-                print(f"Đã sao chép {filename}")
-            else:
-                print(f"Không tìm thấy {filename} trong thư viện OpenCV")
-
-    # Tạo các bộ phát hiện
-    detectors = {}
-    for name, filepath in cascade_files.items():
-        if os.path.exists(filepath):
-            detectors[name] = cv2.CascadeClassifier(filepath)
-
-    # Nếu không có detector nào, trả về rỗng
-    if not detectors:
-        print("Không tìm thấy bộ phát hiện khuôn mặt!")
         return []
 
-    # Chuyển ảnh sang grayscale
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-    # Cải thiện độ tương phản để xử lý tốt hơn với da màu
-    gray = cv2.equalizeHist(gray)
-
-    # Phát hiện khuôn mặt từ nhiều góc
-    faces = []
-
-    # 1. Phát hiện khuôn mặt chính diện
-    if "frontal_face" in detectors:
-        frontal_faces = detectors["frontal_face"].detectMultiScale(
-            gray,
-            scaleFactor=1.1,
-            minNeighbors=5,
-            minSize=(30, 30)
-        )
-
-        if len(frontal_faces) > 0:
-            for (x, y, w, h) in frontal_faces:
-                faces.append((x, y, w, h))
-
-    # 2. Thử với frontal_face_alt nếu không phát hiện được
-    if len(faces) == 0 and "frontal_face_alt" in detectors:
-        alt_faces = detectors["frontal_face_alt"].detectMultiScale(
-            gray,
-            scaleFactor=1.05,
-            minNeighbors=3,
-            minSize=(30, 30)
-        )
-
-        if len(alt_faces) > 0:
-            for (x, y, w, h) in alt_faces:
-                faces.append((x, y, w, h))
-
-    # 3. Thử với profile_face nếu vẫn không phát hiện được
-    if len(faces) == 0 and "profile_face" in detectors:
-        # Phát hiện khuôn mặt nghiêng
-        profile_faces = detectors["profile_face"].detectMultiScale(
-            gray,
-            scaleFactor=1.05,
-            minNeighbors=3,
-            minSize=(30, 30)
-        )
-
-        if len(profile_faces) > 0:
-            for (x, y, w, h) in profile_faces:
-                faces.append((x, y, w, h))
-
-        # Thử phát hiện khuôn mặt nghiêng về phía bên kia (lật ảnh)
-        flipped = cv2.flip(gray, 1)
-        flipped_profile_faces = detectors["profile_face"].detectMultiScale(
-            flipped,
-            scaleFactor=1.05,
-            minNeighbors=3,
-            minSize=(30, 30)
-        )
-
-        if len(flipped_profile_faces) > 0:
-            img_width = gray.shape[1]
-            for (x, y, w, h) in flipped_profile_faces:
-                # Điều chỉnh tọa độ x cho ảnh đã lật
-                faces.append((img_width - x - w, y, w, h))
-
-    return faces
 
 
 def select_best_face(faces, image):
@@ -2285,10 +2166,6 @@ def visualize_emotion_results(face_img, emotion_analysis):
     return img_data
 
 
-def create_caption_visualization(caption, width):
-    pass
-
-
 def visualize_sports_results(img_data, detections, depth_map, sports_analysis, action_analysis, composition_analysis,
                              facial_analysis=None, caption=None):
     """Create sports-specific visualization with enhanced main subject highlighting, emotion analysis and caption"""
@@ -2946,27 +2823,6 @@ def visualize_sports_results(img_data, detections, depth_map, sports_analysis, a
 
     plt.savefig("sports_analysis_results.png", dpi=150)
     plt.close()
-
-    # THÊM MỚI: Xử lý và hiển thị caption
-    if caption:
-        # Đọc ảnh kết quả đã lưu
-        result_img = cv2.imread("sports_analysis_results.png")
-        if result_img is None:
-            print("Lỗi: Không thể đọc ảnh kết quả phân tích")
-            return
-
-        # Tạo hình ảnh caption trực quan đẹp mắt
-        caption_img = create_caption_visualization(caption, width=result_img.shape[1])
-
-        # Ghép dọc với kết quả phân tích
-        combined = np.vstack([result_img, caption_img])
-        cv2.imwrite("sports_analysis_with_caption.png", combined)
-
-        # Lưu thêm caption riêng cho tiện sử dụng
-        cv2.imwrite("sports_caption.png", caption_img)
-
-        print(f"\nCaption: {caption}")
-        print("Visualization with caption saved as: sports_analysis_with_caption.png")
 
     # Print detailed analysis
     print("\n==== SPORTS IMAGE ANALYSIS ====")
