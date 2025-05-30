@@ -237,7 +237,7 @@ class BatchResultWidget(QWidget):
 
         layout.addWidget(self.scroll_area)
 
-    def add_result(self, image_path, caption, result=None):
+    def add_result(self, image_path, caption, result=None, scores=None):
         # Tạo card cho mỗi kết quả
         result_card = QWidget()
         result_card.setStyleSheet("""
@@ -286,6 +286,60 @@ class BatchResultWidget(QWidget):
 
         info_layout.addWidget(filename_label)
         info_layout.addWidget(caption_label)
+
+        # Thêm scores nếu có
+        if scores:
+            scores_widget = QWidget()
+            scores_layout = QGridLayout(scores_widget)
+            scores_layout.setContentsMargins(5, 5, 5, 5)
+            scores_layout.setSpacing(8)
+
+            scores_widget.setStyleSheet("""
+                QWidget {
+                    background-color: #e8f5e8; 
+                    border-radius: 8px; 
+                    padding: 8px;
+                }
+                QLabel {
+                    font-size: 12px;
+                    background-color: transparent;
+                }
+            """)
+
+            row = 0
+
+            # Framing Quality
+            if 'framing_quality' in scores:
+                quality_label = QLabel(f"<b>Framing:</b> {scores['framing_quality']}")
+                scores_layout.addWidget(quality_label, row, 0)
+
+                if 'framing_score' in scores:
+                    score_label = QLabel(f"<b>Score:</b> {scores['framing_score']:.3f}")
+                    scores_layout.addWidget(score_label, row, 1)
+                row += 1
+
+            # Action Quality
+            if 'action_quality' in scores:
+                action_label = QLabel(f"<b>Action:</b> {scores['action_quality']}")
+                scores_layout.addWidget(action_label, row, 0)
+
+                if 'action_level' in scores:
+                    level_label = QLabel(f"<b>Level:</b> {scores['action_level']:.2f}")
+                    scores_layout.addWidget(level_label, row, 1)
+                row += 1
+
+            # Emotion
+            if 'emotion' in scores:
+                emotion_label = QLabel(f"<b>Emotion:</b> {scores['emotion']}")
+                scores_layout.addWidget(emotion_label, row, 0)
+
+                if 'emotion_intensity' in scores and scores['emotion'] != 'No face detected':
+                    intensity_label = QLabel(f"<b>Intensity:</b> {scores['emotion_intensity']:.2f}")
+                    scores_layout.addWidget(intensity_label, row, 1)
+                row += 1
+
+            info_layout.addWidget(scores_widget)
+
         info_layout.addStretch()
 
         card_layout.addWidget(image_label)
@@ -844,13 +898,41 @@ class SportsAnalysisApp(QMainWindow):
 
     def batch_image_completed(self, image_path, result, caption):
         """Xử lý khi một ảnh trong batch hoàn thành"""
-        self.batch_results.add_result(image_path, caption, result)
+        # Trích xuất thông tin score từ result
+        scores = {}
+        if result and 'composition_analysis' in result:
+            comp = result['composition_analysis']
+            scores['framing_quality'] = comp.get('framing_quality', 'Unknown')
+
+            # Lấy framing score chi tiết nếu có
+            if 'framing_analysis' in comp and 'overall_score' in comp['framing_analysis']:
+                scores['framing_score'] = comp['framing_analysis']['overall_score']
+
+        if result and 'action_analysis' in result:
+            action = result['action_analysis']
+            scores['action_quality'] = action.get('action_quality', 'Unknown')
+            scores['action_level'] = action.get('action_level', 0)
+
+        if result and 'facial_analysis' in result and result['facial_analysis'].get('has_faces', False):
+            facial = result['facial_analysis']
+            scores['emotion'] = facial.get('dominant_emotion', 'None')
+            scores['emotion_intensity'] = facial.get('emotion_intensity', 0)
+        else:
+            scores['emotion'] = 'No face detected'
+            scores['emotion_intensity'] = 0
+
+        self.batch_results.add_result(image_path, caption, result, scores)
 
     def batch_image_error(self, image_path, error_message):
         """Xử lý lỗi trong batch processing"""
         filename = os.path.basename(image_path) if image_path else "Unknown"
         error_caption = f"Error processing image: {error_message}"
-        self.batch_results.add_result(image_path, error_caption)
+        error_scores = {
+            'framing_quality': 'Error',
+            'action_quality': 'Error',
+            'emotion': 'Error'
+        }
+        self.batch_results.add_result(image_path, error_caption, None, error_scores)
 
     def batch_analysis_finished(self):
         """Xử lý khi batch analysis hoàn thành"""
@@ -1088,6 +1170,22 @@ class SportsAnalysisApp(QMainWindow):
             comp = result['composition_analysis']
             html += f"<p><b>Sport type:</b> {comp.get('sport_type', 'Unknown')}</p>"
             html += f"<p><b>Framing quality:</b> {comp.get('framing_quality', 'Unknown')}</p>"
+
+            # Hiển thị chi tiết framing quality score
+            if 'framing_analysis' in comp and 'overall_score' in comp['framing_analysis']:
+                framing_details = comp['framing_analysis']
+                html += f"""
+                <div style='margin-left: 20px; margin-top: 10px; padding: 10px; background-color: #f8f9fa; border-radius: 5px;'>
+                    <p style='font-weight: bold; color: #2196F3; margin-bottom: 8px;'>Framing Quality Breakdown:</p>
+                    <p><b>Overall Score:</b> {framing_details.get('overall_score', 0):.3f}</p>
+                    <p><b>Position Score:</b> {framing_details.get('position_score', 0):.3f}</p>
+                    <p><b>Size Score:</b> {framing_details.get('size_score', 0):.3f}</p>
+                    <p><b>Breathing Space:</b> {framing_details.get('breathing_score', 0):.3f}</p>
+                    <p><b>Min Margin:</b> {framing_details.get('min_margin', 0):.3f}</p>
+                    <p><b>Rule of Thirds Distance:</b> {framing_details.get('rule_of_thirds_distance', 0):.3f}</p>
+                    <p><b>Center Distance:</b> {framing_details.get('center_distance', 0):.3f}</p>
+                </div>
+                """
 
         html += f"<p><b>Athletes detected:</b> {result['detections'].get('athletes', 0)}</p>"
 
