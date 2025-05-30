@@ -504,8 +504,17 @@ def generate_depth_map(midas, img_data):
 
 # Hàm phân tích độ sắc nét của đối tượng (MỚI)
 def analyze_object_sharpness(image, boxes):
-    """Phân tích độ sắc nét của từng đối tượng trong ảnh"""
-    # Chuyển sang ảnh grayscale nếu đầu vào là RGB
+    """
+    Phân tích độ sắc nét của các đối tượng được phát hiện
+    Cải thiện: Sử dụng nhiều phương pháp đánh giá sharpness
+    """
+    import cv2
+    import numpy as np
+
+    if len(boxes) == 0:
+        return []
+
+    # Convert to grayscale nếu cần
     if len(image.shape) == 3:
         gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
     else:
@@ -513,52 +522,151 @@ def analyze_object_sharpness(image, boxes):
 
     sharpness_scores = []
     sharpness_details = []
+    h, w = gray.shape
 
     for box in boxes:
-        x1, y1, x2, y2 = box
-        # Giới hạn trong phạm vi ảnh
-        x1, y1 = max(0, x1), max(0, y1)
-        x2, y2 = min(gray.shape[1], x2), min(gray.shape[0], y2)
+        try:
+            # Đảm bảo box nằm trong ảnh
+            x1, y1, x2, y2 = map(int, box[:4])
+            x1 = max(0, min(x1, w - 1))
+            y1 = max(0, min(y1, h - 1))
+            x2 = max(x1 + 1, min(x2, w))
+            y2 = max(y1 + 1, min(y2, h))
 
-        # Kiểm tra nếu box hợp lệ
-        if x1 >= x2 or y1 >= y2:
-            sharpness_scores.append(0)
+            # Trích xuất vùng quan tâm
+            roi = gray[y1:y2, x1:x2]
+
+            # Bỏ qua vùng quá nhỏ
+            if roi.shape[0] < 10 or roi.shape[1] < 10:
+                sharpness_scores.append(0.0)
+                continue
+
+            # **PHƯƠNG PHÁP 1: Laplacian Variance (có lọc noise)**
+            # Áp dụng Gaussian blur nhẹ để giảm noise
+            roi_blur = cv2.GaussianBlur(roi, (3, 3), 0)
+            laplacian = cv2.Laplacian(roi_blur, cv2.CV_64F)
+            laplacian_var = laplacian.var()
+
+            # **PHƯƠNG PHÁP 2: Sobel Gradient Magnitude**
+            sobelx = cv2.Sobel(roi, cv2.CV_64F, 1, 0, ksize=3)
+            sobely = cv2.Sobel(roi, cv2.CV_64F, 0, 1, ksize=3)
+            sobel_magnitude = np.sqrt(sobelx ** 2 + sobely ** 2)
+            sobel_mean = np.mean(sobel_magnitude)
+
+            # **PHƯƠNG PHÁP 3: Brenner Gradient**
+            # Tính gradient theo phương ngang
+            if roi.shape[1] > 2:
+                brenner = np.sum((roi[:, 2:] - roi[:, :-2]) ** 2)
+                brenner_norm = brenner / (roi.shape[0] * (roi.shape[1] - 2))
+            else:
+                brenner_norm = 0
+
+            # **PHƯƠNG PHÁP 4: Tenengrad (Sobel based)**
+            sobelx_thresh = np.where(np.abs(sobelx) > 10, sobelx, 0)
+            sobely_thresh = np.where(np.abs(sobely) > 10, sobely, 0)
+            tenengrad = np.sum(sobelx_thresh ** 2 + sobely_thresh ** 2)
+            tenengrad_norm = tenengrad / (roi.shape[0] * roi.shape[1])
+
+            # **TỔNG HỢP ĐIỂM SHARPNESS**
+            # Normalize từng thành phần
+            laplacian_norm = min(laplacian_var / 1000.0, 1.0)  # Cap ở 1.0
+            sobel_norm = min(sobel_mean / 50.0, 1.0)
+            brenner_norm = min(brenner_norm / 100.0, 1.0)
+            tenengrad_norm = min(tenengrad_norm / 500.0, 1.0)
+
+            # Weighted combination
+            final_score = (
+                    0.3 * laplacian_norm +  # Laplacian variance
+                    0.3 * sobel_norm +  # Sobel gradient
+                    0.2 * brenner_norm +  # Brenner gradient
+                    0.2 * tenengrad_norm  # Tenengrad
+            )
+
+            # **ĐIỀU CHỈNH THEO KÍCH THƯỚC**
+            # Vùng lớn hơn thường có điểm sharpness ổn định hơn
+            area = (x2 - x1) * (y2 - y1)
+            size_factor = min(np.sqrt(area) / 100.0, 1.2)  # Bonus cho vùng lớn
+
+            final_score *= size_factor
+            final_score = min(final_score, 1.0)  # Cap ở 1.0
+
+            sharpness_scores.append(float(final_score))
+
+            # THÊM ĐOẠN NÀY - Lưu chi tiết cho debugging
+            sharpness_details.append({
+                'laplacian_var': laplacian_var,
+                'sobel_mean': sobel_mean,
+                'brenner_norm': brenner_norm,
+                'tenengrad_norm': tenengrad_norm,
+                'combined_score': final_score
+            })
+
+        except Exception as e:
+            print(f"Error calculating sharpness for box {box}: {e}")
+            sharpness_scores.append(0.0)
             sharpness_details.append({
                 'laplacian_var': 0,
                 'sobel_mean': 0,
+                'brenner_norm': 0,
+                'tenengrad_norm': 0,
                 'combined_score': 0
             })
-            continue
-
-        # Trích xuất ROI
-        roi = gray[y1:y2, x1:x2]
-
-        # Áp dụng bộ lọc Laplacian để phát hiện cạnh
-        lap = cv2.Laplacian(roi, cv2.CV_64F)
-        lap_var = lap.var()
-
-        # Tính gradient sử dụng Sobel
-        sobelx = cv2.Sobel(roi, cv2.CV_64F, 1, 0, ksize=3)
-        sobely = cv2.Sobel(roi, cv2.CV_64F, 0, 1, ksize=3)
-        sobel_magnitude = np.sqrt(sobelx ** 2 + sobely ** 2)
-        sobel_mean = np.mean(sobel_magnitude)
-
-        # Kết hợp các số đo (trọng số có thể điều chỉnh)
-        sharpness = lap_var * 0.6 + sobel_mean * 0.4
-        sharpness_scores.append(sharpness)
-
-        sharpness_details.append({
-            'laplacian_var': lap_var,
-            'sobel_mean': sobel_mean,
-            'combined_score': sharpness
-        })
-
-    # Chuẩn hóa điểm
-    if sharpness_scores:
-        max_score = max(sharpness_scores) if max(sharpness_scores) > 0 else 1
-        sharpness_scores = [score / max_score for score in sharpness_scores]
 
     return sharpness_scores, sharpness_details
+
+
+def create_sharpness_heatmap(image, sharpness_map=None):
+    """
+    Tạo heatmap độ sắc nét cho toàn bộ ảnh
+    """
+    try:
+        import cv2
+        import numpy as np
+
+        # Đảm bảo image không None và có shape hợp lệ
+        if image is None or len(image.shape) < 2:
+            print("Invalid image input for sharpness heatmap")
+            return image.copy() if image is not None else np.zeros((100, 100, 3), dtype=np.uint8), None
+
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        else:
+            gray = image.copy()
+
+        # Tính Laplacian cho toàn ảnh với kernel lớn hơn
+        laplacian = cv2.Laplacian(gray, cv2.CV_64F, ksize=5)
+        laplacian_abs = np.abs(laplacian)
+
+        # Làm mịn để tạo heatmap
+        heatmap = cv2.GaussianBlur(laplacian_abs, (21, 21), 0)
+
+        # Normalize về 0-255
+        heatmap_norm = cv2.normalize(heatmap, None, 0, 255, cv2.NORM_MINMAX)
+        heatmap_norm = heatmap_norm.astype(np.uint8)
+
+        # Áp dụng colormap JET
+        heatmap_colored = cv2.applyColorMap(heatmap_norm, cv2.COLORMAP_JET)
+
+        # Chuyển về RGB
+        heatmap_colored = cv2.cvtColor(heatmap_colored, cv2.COLOR_BGR2RGB)
+
+        # Overlay lên ảnh gốc
+        if len(image.shape) == 3:
+            overlay = cv2.addWeighted(image, 0.6, heatmap_colored, 0.4, 0)
+        else:
+            image_colored = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+            overlay = cv2.addWeighted(image_colored, 0.6, heatmap_colored, 0.4, 0)
+
+        print("Sharpness heatmap created successfully")
+        return overlay, heatmap_norm
+
+    except Exception as e:
+        print(f"Error in create_sharpness_heatmap: {e}")
+        # Trả về ảnh gốc và None nếu có lỗi
+        if image is not None:
+            return image.copy(), None
+        else:
+            return np.zeros((100, 100, 3), dtype=np.uint8), None
 
 
 def analyze_sports_scene(detections, depth_map, img_data, yolo_seg=None):
@@ -1193,7 +1301,7 @@ def analyze_sports_composition(detections, analysis, img_data):
 
     # Sports specific enhancements
     result = {
-        'sport_type': 'Unknown',
+        'sport_type': 'Running',
         'framing_quality': 'Unknown',
         'recommended_crop': None,
         'action_focus': 'Unknown'
@@ -1251,43 +1359,380 @@ def analyze_sports_composition(detections, analysis, img_data):
     # Lưu thông tin phân tích môi trường
     result['environment_analysis'] = env_analysis
 
-    # Evaluate framing quality for sports action
-    if "key_subjects" in analysis and analysis['key_subjects']:
-        subject_positions = [subject['position'] for subject in analysis['key_subjects']]
+    framing_score = 0.0
+    framing_details = {}
 
-        # Check if key subjects are well placed (rule of thirds or centered)
-        well_placed_count = 0
-        for pos in subject_positions:
-            # Check rule of thirds points
-            thirds_points = [
-                (1 / 3, 1 / 3), (2 / 3, 1 / 3),
-                (1 / 3, 2 / 3), (2 / 3, 2 / 3)
-            ]
+    sports_analysis_data = analysis.get('sports_analysis', {})
 
-            center_point = (0.5, 0.5)
+    if "key_subjects" in sports_analysis_data and sports_analysis_data['key_subjects']:
+        print("=== Analyzing Framing Quality ===")
 
-            # Check if close to rule of thirds points or center
-            for third in thirds_points:
-                dist = np.sqrt((pos[0] - third[0]) ** 2 + (pos[1] - third[1]) ** 2)
-                if dist < 0.1:  # 10% of image width/height
-                    well_placed_count += 1
-                    break
+        # THÊM: Phát hiện nhóm vận động viên
+        people_subjects = [s for s in sports_analysis_data['key_subjects'] if s['class'] == 'person']
+        total_athletes = detections.get('athletes', 0)
 
-            # Check if centered
-            dist_to_center = np.sqrt((pos[0] - center_point[0]) ** 2 + (pos[1] - center_point[1]) ** 2)
-            if dist_to_center < 0.1:
-                well_placed_count += 1
+        print(f"DEBUG - Total athletes detected: {total_athletes}")
+        print(f"DEBUG - People in key_subjects: {len(people_subjects)}")
 
-        if well_placed_count / len(subject_positions) > 0.7:
-            result['framing_quality'] = 'Excellent'
-        elif well_placed_count / len(subject_positions) > 0.4:
-            result['framing_quality'] = 'Good'
+        # LOGIC MỚI: Phát hiện nhóm đông người (TIÊU CHÍ NGHIÊM NGẶT HƠN)
+        is_group_scene = False
+
+        # Điều kiện 1: Có nhiều người
+        if total_athletes >= 3 and len(people_subjects) >= 2:
+            print("DEBUG - Condition 1 met: Multiple people detected")
+
+            # Điều kiện 2: Kích thước đối tượng chính > 35% = có thể là nhóm
+            main_subject_temp = sports_analysis_data['key_subjects'][0]
+            temp_box = main_subject_temp['box']
+            temp_area = (temp_box[2] - temp_box[0]) * (temp_box[3] - temp_box[1])
+            temp_ratio = temp_area / (img_data['resized_array'].shape[0] * img_data['resized_array'].shape[1])
+
+            print(f"DEBUG - Main subject size ratio: {temp_ratio:.3f}")
+
+            if temp_ratio > 0.35:  # Nếu đối tượng chính chiếm > 35% ảnh
+                is_group_scene = True
+                print("DEBUG - Condition 2 met: Large subject size suggests group")
+
+            # Điều kiện 3: Kiểm tra khoảng cách (CHỈ NẾU CHƯA XÁC ĐỊNH ĐƯỢC)
+            if not is_group_scene and len(people_subjects) >= 3:
+                # Kiểm tra xem các người có gần nhau không
+                positions = [s['position'] for s in people_subjects[:6]]  # Lấy tối đa 6 người đầu
+
+                # Tính khoảng cách trung bình giữa các người
+                distances = []
+                for i in range(len(positions)):
+                    for j in range(i + 1, len(positions)):
+                        dist = np.sqrt((positions[i][0] - positions[j][0]) ** 2 +
+                                       (positions[i][1] - positions[j][1]) ** 2)
+                        distances.append(dist)
+
+                if distances:
+                    avg_distance = np.mean(distances)
+                    print(f"DEBUG - Average distance between people: {avg_distance:.3f}")
+
+                    # Nếu khoảng cách trung bình < 0.3 (30% ảnh) = nhóm sát nhau
+                    if avg_distance < 0.3:
+                        is_group_scene = True
+                        print("DEBUG - Detected GROUP SCENE (crowded athletes)")
+
+        if is_group_scene:
+            # PHÂN TÍCH NHÓM: Lấy bounding box bao quanh toàn bộ nhóm
+            all_boxes = [s['box'] for s in people_subjects[:8]]  # Tối đa 8 người
+
+            # Tính group bounding box
+            min_x = min([box[0] for box in all_boxes])
+            min_y = min([box[1] for box in all_boxes])
+            max_x = max([box[2] for box in all_boxes])
+            max_y = max([box[3] for box in all_boxes])
+
+            group_box = [min_x, min_y, max_x, max_y]
+            group_pos = [(min_x + max_x) / 2 / img_data['resized_array'].shape[1],
+                         (min_y + max_y) / 2 / img_data['resized_array'].shape[0]]
+
+            main_subject = {
+                'box': group_box,
+                'position': group_pos,
+                'class': 'group',
+                'is_group': True
+            }
+
+            print(f"DEBUG - Group position: {group_pos}")
+            print(f"DEBUG - Group box: {group_box}")
         else:
-            result['framing_quality'] = 'Could be improved'
+            # PHÂN TÍCH ĐƠN LẺ: Lấy đối tượng chính như cũ
+            main_subject = sports_analysis_data['key_subjects'][0]
+            main_subject['is_group'] = False
+
+        main_pos = main_subject['position']
+        main_box = main_subject['box']
+
+        print(f"Main subject position: {main_pos}")
+        print(f"Main subject class: {main_subject['class']}")
+
+        # 1. PHÂN TÍCH VỊ TRÍ THEO RULE OF THIRDS
+        # Các điểm vàng theo quy tắc 1/3
+        rule_of_thirds_points = [
+            (1 / 3, 1 / 3), (2 / 3, 1 / 3),  # Top left, top right
+            (1 / 3, 2 / 3), (2 / 3, 2 / 3)  # Bottom left, bottom right
+        ]
+
+        # Tìm điểm gần nhất với rule of thirds
+        min_dist_to_thirds = float('inf')
+        closest_third_point = None
+
+        for third_point in rule_of_thirds_points:
+            dist = np.sqrt((main_pos[0] - third_point[0]) ** 2 + (main_pos[1] - third_point[1]) ** 2)
+            if dist < min_dist_to_thirds:
+                min_dist_to_thirds = dist
+                closest_third_point = third_point
+
+        # Điểm cho rule of thirds (càng gần càng cao)
+        thirds_score = max(0, 1 - (min_dist_to_thirds / 0.3))  # Ngưỡng 30% khoảng cách
+        print(f"Rule of thirds score: {thirds_score:.3f} (distance: {min_dist_to_thirds:.3f})")
+
+        # 2. PHÂN TÍCH VỊ TRÍ TRUNG TÂM
+        center_dist = np.sqrt((main_pos[0] - 0.5) ** 2 + (main_pos[1] - 0.5) ** 2)
+        center_score = max(0, 1 - (center_dist / 0.4))  # Ngưỡng 40% từ trung tâm
+        print(f"Center placement score: {center_score:.3f} (distance: {center_dist:.3f})")
+
+        # 3. PHÂN TÍCH KÍCH THƯỚC ĐỐI TƯỢNG CHÍNH
+        img_height = img_data['resized_array'].shape[0]
+        img_width = img_data['resized_array'].shape[1]
+
+        subject_width = main_box[2] - main_box[0]
+        subject_height = main_box[3] - main_box[1]
+        subject_area = subject_width * subject_height
+        img_area = img_width * img_height
+
+        size_ratio = subject_area / img_area
+        print(f"Subject size ratio: {size_ratio:.3f}")
+
+        # ĐIỀU CHỈNH: Tiêu chuẩn kích thước NGHIÊM NGẶT cho nhóm
+        if main_subject.get('is_group', False):
+            # Nhóm người: Áp dụng PENALTY cho kích thước quá lớn
+            if 0.25 <= size_ratio <= 0.45:
+                size_score = 1.0  # Kích thước lý tưởng cho nhóm
+            elif 0.45 < size_ratio <= 0.60:
+                size_score = 0.6  # PENALTY: Nhóm hơi lớn
+            elif 0.60 < size_ratio <= 0.75:
+                size_score = 0.3  # PENALTY MẠNH: Nhóm quá lớn
+            elif size_ratio > 0.75:
+                size_score = 0.1  # PENALTY RẤT MẠNH: Nhóm chiếm gần hết ảnh
+            elif 0.15 <= size_ratio < 0.25:
+                size_score = 0.7  # Nhóm hơi nhỏ
+            else:
+                size_score = 0.4  # Nhóm quá nhỏ
+
+            print(f"DEBUG - Applied GROUP size scoring: {size_score:.3f} (ratio: {size_ratio:.3f})")
+        else:
+            # Đơn lẻ: kích thước lý tưởng nhỏ hơn (15-40%)
+            if 0.15 <= size_ratio <= 0.40:
+                size_score = 1.0
+            elif 0.10 <= size_ratio < 0.15:
+                size_score = 0.8
+            elif 0.40 < size_ratio <= 0.60:
+                size_score = 0.7
+            elif 0.05 <= size_ratio < 0.10:
+                size_score = 0.5
+            else:
+                size_score = 0.3
+            print("DEBUG - Applied INDIVIDUAL size scoring")
+
+        print(f"Size score: {size_score:.3f}")
+
+        # 4. PHÂN TÍCH KHÔNG GIAN XUNG QUANH (BREATHING ROOM)
+        # Kiểm tra đối tượng có quá gần viền không
+        margin_left = main_pos[0]
+        margin_right = 1 - main_pos[0]
+        margin_top = main_pos[1]
+        margin_bottom = 1 - main_pos[1]
+
+        min_margin = min(margin_left, margin_right, margin_top, margin_bottom)
+
+        # ĐIỀU CHỈNH: Tiêu chuẩn margin NGHIÊM NGẶT cho nhóm
+        if main_subject.get('is_group', False):
+            # Nhóm người: PENALTY cho margin quá lớn (tức là nhóm quá nhỏ hoặc ở giữa)
+            if 0.05 <= min_margin <= 0.15:
+                breathing_score = 1.0  # Margin lý tưởng cho nhóm
+            elif 0.15 < min_margin <= 0.25:
+                breathing_score = 0.7  # Hơi nhiều không gian trống
+            elif 0.25 < min_margin <= 0.35:
+                breathing_score = 0.4  # PENALTY: Quá nhiều không gian trống
+            elif min_margin > 0.35:
+                breathing_score = 0.2  # PENALTY MẠNH: Nhóm quá nhỏ so với ảnh
+            elif 0.02 <= min_margin < 0.05:
+                breathing_score = 0.8  # Hơi sát viền nhưng ok cho nhóm
+            else:
+                breathing_score = 0.3  # Quá sát viền
+
+            print(f"DEBUG - Applied GROUP breathing room scoring: {breathing_score:.3f} (margin: {min_margin:.3f})")
+        else:
+            # Đơn lẻ: yêu cầu margin cao hơn
+            if min_margin >= 0.15:
+                breathing_score = 1.0
+            elif min_margin >= 0.10:
+                breathing_score = 0.8
+            elif min_margin >= 0.05:
+                breathing_score = 0.5
+            else:
+                breathing_score = 0.2
+            print("DEBUG - Applied INDIVIDUAL breathing room scoring")
+
+        print(f"Breathing room score: {breathing_score:.3f} (min margin: {min_margin:.3f})")
+
+        # 5. PHÂN TÍCH ĐỐI TƯỢNG PHỤ
+        secondary_objects_score = 1.0
+
+        if len(sports_analysis_data['key_subjects']) > 1:
+            # Kiểm tra đối tượng phụ có che khuất đối tượng chính không
+            overlap_penalty = 0
+
+            for i, secondary_subject in enumerate(sports_analysis_data['key_subjects'][1:4]):  # Chỉ xét 3 đối tượng đầu
+                sec_pos = secondary_subject['position']
+                sec_box = secondary_subject['box']
+
+                # Tính overlap với đối tượng chính
+                x1_main, y1_main, x2_main, y2_main = main_box
+                x1_sec, y1_sec, x2_sec, y2_sec = sec_box
+
+                # Tính intersection
+                x_left = max(x1_main, x1_sec)
+                y_top = max(y1_main, y1_sec)
+                x_right = min(x2_main, x2_sec)
+                y_bottom = min(y2_main, y2_sec)
+
+                if x_right > x_left and y_bottom > y_top:
+                    intersection = (x_right - x_left) * (y_bottom - y_top)
+                    main_area = (x2_main - x1_main) * (y2_main - y1_main)
+                    overlap_ratio = intersection / main_area
+
+                    if overlap_ratio > 0.2:  # Nếu che khuất > 20%
+                        overlap_penalty += overlap_ratio * 0.3
+                        print(f"Overlap detected with secondary object {i + 1}: {overlap_ratio:.3f}")
+
+            secondary_objects_score = max(0.2, 1.0 - overlap_penalty)
+
+        print(f"Secondary objects score: {secondary_objects_score:.3f}")
+
+        # 6. ĐIỀU CHỈNH THEO LOẠI THỂ THAO VÀ NHÓM
+        sport_bonus = 1.0
+        sport_type = result.get('sport_type', 'Unknown').lower()
+
+        if main_subject.get('is_group', False):
+            # NHÓM: Ưu tiên kích thước và breathing room hơn vị trí
+            if sport_type in ['track', 'running', 'marathon']:
+                sport_bonus = 1.0 + (size_score * 0.15) + (breathing_score * 0.10)
+            elif sport_type in ['soccer', 'football', 'basketball']:
+                sport_bonus = 1.0 + (size_score * 0.10) + (thirds_score * 0.10)
+            else:
+                sport_bonus = 1.0 + (size_score * 0.10)
+            print("DEBUG - Applied GROUP sport bonus")
+        else:
+            # ĐƠN LẺ: Logic cũ
+            if sport_type in ['soccer', 'football', 'basketball']:
+                sport_bonus = 1.0 + (thirds_score * 0.2)
+            elif sport_type in ['tennis', 'golf', 'individual']:
+                sport_bonus = 1.0 + (center_score * 0.2)
+            elif sport_type in ['track', 'running', 'swimming']:
+                sport_bonus = 1.0 + (size_score * 0.1) + (breathing_score * 0.1)
+            print("DEBUG - Applied INDIVIDUAL sport bonus")
+
+        print(f"Sport bonus: {sport_bonus:.3f}")
+
+        # 7. TÍNH ĐIỂM TỔNG HỢP
+        # Trọng số cho từng yếu tố
+        position_weight = 0.35  # Rule of thirds hoặc center
+        size_weight = 0.25
+        breathing_weight = 0.20
+        secondary_weight = 0.20
+
+        # Chọn điểm cao hơn giữa rule of thirds và center
+        position_score = max(thirds_score, center_score)
+
+        framing_score = (
+                                position_score * position_weight +
+                                size_score * size_weight +
+                                breathing_score * breathing_weight +
+                                secondary_objects_score * secondary_weight
+                        ) * sport_bonus
+
+        # 8. THÊM PENALTY ĐẶC BIỆT CHO NHÓM ĐÔNG NGƯỜI
+        group_penalty = 1.0
+        if main_subject.get('is_group', False):
+            # Penalty dựa trên số lượng người và mật độ
+            if total_athletes >= 8:
+                group_penalty = 0.85  # 15% penalty cho nhóm rất đông
+            elif total_athletes >= 5:
+                group_penalty = 0.90  # 10% penalty cho nhóm đông
+
+            # Penalty thêm nếu kích thước + margin đều cao (= framing kém)
+            if size_ratio > 0.5 and min_margin > 0.3:
+                group_penalty *= 0.8  # 20% penalty thêm
+                print("DEBUG - Applied DOUBLE PENALTY for large group with too much space")
+
+            print(f"DEBUG - Group penalty applied: {group_penalty:.3f}")
+
+        # 9. TÍNH ĐIỂM TỔNG HỢP VỚI PENALTY
+        # Trọng số cho từng yếu tố
+        position_weight = 0.25  # Giảm từ 0.35 xuống 0.25 cho nhóm
+        size_weight = 0.35  # Tăng từ 0.25 lên 0.35 (quan trọng hơn)
+        breathing_weight = 0.25  # Tăng từ 0.20 lên 0.25
+        secondary_weight = 0.15  # Giảm từ 0.20 xuống 0.15
+
+        # Chọn điểm cao hơn giữa rule of thirds và center
+        position_score = max(thirds_score, center_score)
+
+        framing_score = (
+                                position_score * position_weight +
+                                size_score * size_weight +
+                                breathing_score * breathing_weight +
+                                secondary_objects_score * secondary_weight
+                        ) * sport_bonus * group_penalty  # THÊM GROUP PENALTY
+
+        framing_score = min(1.0, framing_score)  # Cap ở 1.0
+
+        print(f"Final framing score: {framing_score:.3f}")
+
+        # 10. PHÂN LOẠI CHẤT LƯỢNG (NGHIÊM NGẶT HƠN CHO NHÓM)
+        if main_subject.get('is_group', False):
+            # Tiêu chuẩn nghiêm ngặt hơn cho nhóm
+            if framing_score >= 0.90:
+                framing_quality = 'Excellent'
+            elif framing_score >= 0.75:
+                framing_quality = 'Very Good'
+            elif framing_score >= 0.60:
+                framing_quality = 'Good'
+            elif framing_score >= 0.45:
+                framing_quality = 'Fair'
+            else:
+                framing_quality = 'Could be improved'
+            print("DEBUG - Applied GROUP quality standards")
+        else:
+            # Tiêu chuẩn bình thường cho đơn lẻ
+            if framing_score >= 0.85:
+                framing_quality = 'Excellent'
+            elif framing_score >= 0.70:
+                framing_quality = 'Very Good'
+            elif framing_score >= 0.55:
+                framing_quality = 'Good'
+            elif framing_score >= 0.40:
+                framing_quality = 'Fair'
+            else:
+                framing_quality = 'Could be improved'
+            print("DEBUG - Applied INDIVIDUAL quality standards")
+
+        result['framing_quality'] = framing_quality
+
+        # Lưu chi tiết phân tích
+        framing_details = {
+            'overall_score': framing_score,
+            'position_score': position_score,
+            'size_score': size_score,
+            'breathing_score': breathing_score,
+            'secondary_objects_score': secondary_objects_score,
+            'sport_bonus': sport_bonus,
+            'main_subject_position': main_pos,
+            'size_ratio': size_ratio,
+            'min_margin': min_margin,
+            'rule_of_thirds_distance': min_dist_to_thirds,
+            'center_distance': center_dist
+        }
+
+        print(f"=== Framing Quality: {framing_quality} ({framing_score:.3f}) ===")
+
+    else:
+        result['framing_quality'] = 'Cannot analyze - no subjects detected'
+        framing_details = {'error': 'No key subjects found'}
+        print("Cannot analyze framing quality - no key subjects detected")
+
+    # Lưu chi tiết vào kết quả
+    result['framing_analysis'] = framing_details
 
     # Recommend crop if needed
-    if "key_subjects" in analysis and analysis['key_subjects']:
-        main_subject = analysis['key_subjects'][0]
+    sports_analysis_data = analysis.get('sports_analysis', {})
+
+    if "key_subjects" in sports_analysis_data and sports_analysis_data['key_subjects']:
+        main_subject = sports_analysis_data['key_subjects'][0]
         x_pos = main_subject['position'][0]
         y_pos = main_subject['position'][1]
 
@@ -1899,7 +2344,7 @@ def analyze_facial_expression_advanced(detections, img_data, depth_map=None, spo
 
         # 6. PHÂN TÍCH NGỮ CẢNH THỂ THAO
         # Xác định loại thể thao
-        sport_type = "Unknown"
+        sport_type = "Running"
         if isinstance(sports_analysis, dict):
             if "composition_analysis" in sports_analysis:
                 sport_type = sports_analysis["composition_analysis"].get("sport_type", "Unknown")
@@ -2339,35 +2784,126 @@ def visualize_sports_results(img_data, detections, depth_map, sports_analysis, a
             cv2.putText(comp_viz, label_text,
                         (x1, y2 + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
-    # Tạo heatmap độ sắc nét
-    sharpness_viz = img.copy()
+    # Tạo heatmap độ sắc nét cải tiến
+    try:
+        # Tạo sharpness heatmap cho toàn bộ ảnh
+        sharpness_overlay, sharpness_heatmap_raw = create_sharpness_heatmap(img)
+        sharpness_viz = sharpness_overlay.copy()
 
-    # Sử dụng colormap
-    from matplotlib import cm
-    jet_colormap = cm.get_cmap('jet')
+        # Sử dụng colormap
+        from matplotlib import cm
+        jet_colormap = cm.get_cmap('jet')
 
-    for i, box in enumerate(detections['boxes']):
-        if i < len(sharpness_scores):
-            x1, y1, x2, y2 = box
-            sharpness = sharpness_scores[i]
+        # Vẽ bounding boxes với sharpness scores
+        for i, box in enumerate(detections['boxes']):
+            if i < len(sharpness_scores):
+                x1, y1, x2, y2 = box
+                sharpness = sharpness_scores[i]
 
-            # Màu dựa trên độ sắc nét
-            color_rgba = jet_colormap(sharpness)
-            color_rgb = tuple(int(255 * c) for c in color_rgba[:3])
-            color = (color_rgb[2], color_rgb[1], color_rgb[0])  # BGR for OpenCV
+                # Màu dựa trên độ sắc nét
+                color_rgba = jet_colormap(sharpness)
+                color_rgb = tuple(int(255 * c) for c in color_rgba[:3])
+                color = (color_rgb[2], color_rgb[1], color_rgb[0])  # BGR for OpenCV
 
-            # Vẽ heatmap với opacity dựa trên độ sắc nét
-            overlay = sharpness_viz.copy()
-            cv2.rectangle(overlay, (x1, y1), (x2, y2), color, -1)  # Filled rectangle
+                # Vẽ border dày hơn cho objects có sharpness cao
+                border_thickness = max(2, int(sharpness * 5))
+                cv2.rectangle(sharpness_viz, (x1, y1), (x2, y2), color, border_thickness)
 
-            # Thêm overlay với alpha blending
-            alpha = 0.4 + 0.3 * sharpness  # More opaque for sharper objects
-            cv2.addWeighted(overlay, alpha, sharpness_viz, 1 - alpha, 0, sharpness_viz)
+                # Thêm nhãn với background
+                label_text = f"Sharp: {sharpness:.2f}"
+                (label_w, label_h), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
 
-            # Thêm border và nhãn
-            cv2.rectangle(sharpness_viz, (x1, y1), (x2, y2), color, 3)
-            cv2.putText(sharpness_viz, f"Sharp: {sharpness:.2f}",
-                        (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                # Background cho text
+                cv2.rectangle(sharpness_viz, (x1, y1 - label_h - 10), (x1 + label_w, y1), color, -1)
+                cv2.putText(sharpness_viz, label_text, (x1, y1 - 5),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+
+        print("Sharpness heatmap created successfully")
+
+    except Exception as e:
+        print(f"Error creating sharpness heatmap: {e}")
+        # Fallback to original method
+        try:
+            # Tạo sharpness heatmap cho toàn bộ ảnh
+            sharpness_overlay, sharpness_heatmap_raw = create_sharpness_heatmap(img)
+            sharpness_viz = sharpness_overlay.copy()
+
+            # Sử dụng colormap
+            from matplotlib import cm
+            jet_colormap = cm.get_cmap('jet')
+
+            # Vẽ bounding boxes với sharpness scores
+            for i, box in enumerate(detections['boxes']):
+                if i < len(sharpness_scores):
+                    x1, y1, x2, y2 = box
+                    sharpness = sharpness_scores[i]
+
+                    # Màu dựa trên độ sắc nét
+                    color_rgba = jet_colormap(sharpness)
+                    color_rgb = tuple(int(255 * c) for c in color_rgba[:3])
+                    color = (color_rgb[2], color_rgb[1], color_rgb[0])  # BGR for OpenCV
+
+                    # Vẽ border dày hơn cho objects có sharpness cao
+                    border_thickness = max(2, int(sharpness * 5))
+                    cv2.rectangle(sharpness_viz, (x1, y1), (x2, y2), color, border_thickness)
+
+                    # Thêm nhãn với background
+                    label_text = f"Sharp: {sharpness:.2f}"
+                    (label_w, label_h), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+
+                    # Background cho text
+                    cv2.rectangle(sharpness_viz, (x1, y1 - label_h - 10), (x1 + label_w, y1), color, -1)
+                    cv2.putText(sharpness_viz, label_text, (x1, y1 - 5),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+
+            print("Sharpness heatmap created successfully")
+
+        except Exception as e:
+            print(f"Error creating sharpness heatmap: {e}")
+            # Fallback to original method
+            sharpness_viz = img.copy()
+
+            from matplotlib import cm
+            jet_colormap = cm.get_cmap('jet')
+
+            for i, box in enumerate(detections['boxes']):
+                if i < len(sharpness_scores):
+                    x1, y1, x2, y2 = box
+                    sharpness = sharpness_scores[i]
+
+                    color_rgba = jet_colormap(sharpness)
+                    color_rgb = tuple(int(255 * c) for c in color_rgba[:3])
+                    color = (color_rgb[2], color_rgb[1], color_rgb[0])
+
+                    overlay = sharpness_viz.copy()
+                    cv2.rectangle(overlay, (x1, y1), (x2, y2), color, -1)
+                    alpha = 0.4 + 0.3 * sharpness
+                    cv2.addWeighted(overlay, alpha, sharpness_viz, 1 - alpha, 0, sharpness_viz)
+
+                    cv2.rectangle(sharpness_viz, (x1, y1), (x2, y2), color, 3)
+                    cv2.putText(sharpness_viz, f"Sharp: {sharpness:.2f}",
+                                (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+
+        from matplotlib import cm
+        jet_colormap = cm.get_cmap('jet')
+
+        for i, box in enumerate(detections['boxes']):
+            if i < len(sharpness_scores):
+                x1, y1, x2, y2 = box
+                sharpness = sharpness_scores[i]
+
+                color_rgba = jet_colormap(sharpness)
+                color_rgb = tuple(int(255 * c) for c in color_rgba[:3])
+                color = (color_rgb[2], color_rgb[1], color_rgb[0])
+
+                overlay = sharpness_viz.copy()
+                cv2.rectangle(overlay, (x1, y1), (x2, y2), color, -1)
+                alpha = 0.4 + 0.3 * sharpness
+                cv2.addWeighted(overlay, alpha, sharpness_viz, 1 - alpha, 0, sharpness_viz)
+
+                cv2.rectangle(sharpness_viz, (x1, y1), (x2, y2), color, 3)
+                cv2.putText(sharpness_viz, f"Sharp: {sharpness:.2f}",
+                            (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
     # THÊM MỚI: Hiển thị keypoints từ pose estimation nếu có
     pose_viz = img.copy()
@@ -2857,6 +3393,16 @@ def visualize_sports_results(img_data, detections, depth_map, sports_analysis, a
     print("\nComposition Analysis:")
     print(f"- Framing quality: {composition_analysis['framing_quality']}")
 
+    # Hiển thị chi tiết framing analysis nếu có
+    if 'framing_analysis' in composition_analysis and 'overall_score' in composition_analysis['framing_analysis']:
+        framing = composition_analysis['framing_analysis']
+        print(f"  * Overall score: {framing['overall_score']:.3f}")
+        print(f"  * Position score: {framing['position_score']:.3f}")
+        print(f"  * Size score: {framing['size_score']:.3f}")
+        print(f"  * Breathing room score: {framing['breathing_score']:.3f}")
+        print(f"  * Subject size ratio: {framing['size_ratio']:.3f}")
+        print(f"  * Min margin: {framing['min_margin']:.3f}")
+
     if composition_analysis['recommended_crop']:
         crop = composition_analysis['recommended_crop']
         direction_x = "right" if crop['shift_x'] < 0 else "left"
@@ -2917,8 +3463,15 @@ def visualize_sports_results(img_data, detections, depth_map, sports_analysis, a
             f"- Equipment detected: {', '.join(action_analysis['equipment_types']) if action_analysis['equipment_types'] else 'None'}\n")
         f.write(f"- Action quality: {action_analysis['action_quality']} ({action_analysis['action_level']:.2f})\n")
 
-        f.write("\nComposition Analysis:\n")
-        f.write(f"- Framing quality: {composition_analysis['framing_quality']}\n")
+        # Thêm chi tiết framing analysis
+        if 'framing_analysis' in composition_analysis and 'overall_score' in composition_analysis['framing_analysis']:
+            framing = composition_analysis['framing_analysis']
+            f.write(f"  * Overall score: {framing['overall_score']:.3f}\n")
+            f.write(f"  * Position score: {framing['position_score']:.3f}\n")
+            f.write(f"  * Size score: {framing['size_score']:.3f}\n")
+            f.write(f"  * Breathing room score: {framing['breathing_score']:.3f}\n")
+            f.write(f"  * Subject size ratio: {framing['size_ratio']:.3f}\n")
+            f.write(f"  * Min margin: {framing['min_margin']:.3f}\n")
 
         if composition_analysis['recommended_crop']:
             crop = composition_analysis['recommended_crop']
@@ -3076,8 +3629,8 @@ def generate_sports_caption(analysis_result):
     closing_phrases = []  # Conclusion
 
     # ----------------- 1. IDENTIFY SPORT TYPE -----------------
-    sport_type = composition_analysis.get('sport_type', 'Unknown').lower()
-    sport_type_original = composition_analysis.get('sport_type', 'Unknown')
+    sport_type = composition_analysis.get('sport_type', 'Running').lower()
+    sport_type_original = composition_analysis.get('sport_type', 'Running')
     athlete_count = detections.get('athletes', 0)
     action_level = action_analysis.get('action_level', 0)
     action_quality = action_analysis.get('action_quality', '')
