@@ -32,13 +32,29 @@ class AnalysisThread(QThread):
 
     def run(self):
         try:
-            # Mô phỏng tiến trình xử lý
-            for i in range(0, 101, 10):
-                self.progress.emit(i)
-                self.msleep(100)
+            self.progress.emit(10)
+            self.msleep(50)
+
+            # Bước 1: Preprocessing
+            self.progress.emit(20)
+            self.msleep(100)
+
+            # Bước 2: Object Detection
+            self.progress.emit(40)
+            self.msleep(200)
+
+            # Bước 3: Depth Analysis
+            self.progress.emit(60)
+            self.msleep(200)
+
+            # Bước 4: Facial & Pose Analysis
+            self.progress.emit(80)
+            self.msleep(200)
 
             # Gọi hàm phân tích từ ML_1.py
             result = analyze_sports_image(self.image_path)
+
+            self.progress.emit(100)
             self.finished.emit(result)
 
         except Exception as e:
@@ -925,7 +941,7 @@ class SportsAnalysisApp(QMainWindow):
 
     def batch_image_error(self, image_path, error_message):
         """Xử lý lỗi trong batch processing"""
-        filename = os.path.basename(image_path) if image_path else "Unknown"
+        os.path.basename(image_path) if image_path else "Unknown"
         error_caption = f"Error processing image: {error_message}"
         error_scores = {
             'framing_quality': 'Error',
@@ -1220,6 +1236,7 @@ class SportsAnalysisApp(QMainWindow):
 
             html += "</table></div>"
 
+
         # Facial Expression Analysis
         if 'facial_analysis' in result and result['facial_analysis'].get('has_faces', False):
             facial = result['facial_analysis']
@@ -1237,6 +1254,47 @@ class SportsAnalysisApp(QMainWindow):
                 <p><b>Emotional value:</b> {facial.get('emotional_value', 'Unknown')}</p>
             </div>
             """
+
+            # Smart Suggestions
+            html += """
+            <div class='section'>
+                <div class='header'>💡 Smart Suggestions</div>
+            """
+
+            suggestions = []
+
+            # Framing suggestions
+            if 'composition_analysis' in result and 'framing_analysis' in result['composition_analysis']:
+                framing = result['composition_analysis']['framing_analysis']
+                overall_score = framing.get('overall_score', 0)
+
+                if overall_score < 0.6:
+                    suggestions.append("📷 Consider repositioning subject using rule of thirds")
+                    if framing.get('min_margin', 0) < 0.1:
+                        suggestions.append("📏 Give subject more breathing space from edges")
+
+            # Action suggestions
+            if 'action_analysis' in result:
+                action_level = result['action_analysis'].get('action_level', 0)
+                if action_level < 0.4:
+                    suggestions.append("⚡ Try capturing during peak action moments")
+
+            # Technical suggestions
+            if 'sports_analysis' in result and 'sharpness_scores' in result['sports_analysis']:
+                avg_sharpness = sum(result['sports_analysis']['sharpness_scores']) / len(
+                    result['sports_analysis']['sharpness_scores'])
+                if avg_sharpness < 0.6:
+                    suggestions.append("🔍 Consider faster shutter speed for sharper images")
+
+            if suggestions:
+                for suggestion in suggestions:
+                    html += f"<p style='margin: 5px 0; padding: 8px; background-color: #fff3cd; border-left: 4px solid #ffc107; border-radius: 4px;'>{suggestion}</p>"
+            else:
+                html += "<p style='color: #4CAF50;'>✅ Excellent photo! No major improvements needed.</p>"
+
+            html += "</div>"
+
+            self.stats_label.setText(html)
 
         self.stats_label.setText(html)
 
@@ -1306,12 +1364,10 @@ class SportsAnalysisApp(QMainWindow):
         self.analyze_btn.setEnabled(False)
 
     def clear_batch_list(self):
-        """Xóa danh sách batch"""
         self.batch_list.clear()
         self.analyze_btn.setEnabled(False)
 
     def export_batch_results(self):
-        """Export kết quả batch"""
         self.batch_results.export_results()
 
 if __name__ == "__main__":

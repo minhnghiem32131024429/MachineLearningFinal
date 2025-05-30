@@ -429,9 +429,6 @@ def detect_sports_objects(yolo, img_data):
     results = yolo(img_data['resized_array'], conf=0.25)
 
     # Extract detections
-    boxes = []
-    classes = []
-    scores = []
     sports_classes = ['person', 'sports ball', 'tennis racket', 'baseball bat', 'baseball glove',
                       'skateboard', 'surfboard', 'tennis ball', 'bottle', 'wine glass', 'cup',
                       'frisbee', 'skis', 'snowboard', 'kite']
@@ -1290,7 +1287,7 @@ def analyze_sports_composition(detections, analysis, img_data):
     """Analyze the composition with sports-specific context"""
 
     # Basic composition from existing analysis
-    composition = analysis["composition_analysis"] if "composition_analysis" in analysis else {}
+    analysis["composition_analysis"] if "composition_analysis" in analysis else {}
 
     # Phân tích môi trường thể thao
     depth_map = None
@@ -1458,13 +1455,11 @@ def analyze_sports_composition(detections, analysis, img_data):
 
         # Tìm điểm gần nhất với rule of thirds
         min_dist_to_thirds = float('inf')
-        closest_third_point = None
 
         for third_point in rule_of_thirds_points:
             dist = np.sqrt((main_pos[0] - third_point[0]) ** 2 + (main_pos[1] - third_point[1]) ** 2)
             if dist < min_dist_to_thirds:
                 min_dist_to_thirds = dist
-                closest_third_point = third_point
 
         # Điểm cho rule of thirds (càng gần càng cao)
         thirds_score = max(0, 1 - (min_dist_to_thirds / 0.3))  # Ngưỡng 30% khoảng cách
@@ -1568,7 +1563,7 @@ def analyze_sports_composition(detections, analysis, img_data):
             overlap_penalty = 0
 
             for i, secondary_subject in enumerate(sports_analysis_data['key_subjects'][1:4]):  # Chỉ xét 3 đối tượng đầu
-                sec_pos = secondary_subject['position']
+                secondary_subject['position']
                 sec_box = secondary_subject['box']
 
                 # Tính overlap với đối tượng chính
@@ -1785,7 +1780,7 @@ def analyze_facial_expression_advanced(detections, img_data, depth_map=None, spo
         os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 
         image = img_data['resized_array']
-        img_area = image.shape[0] * image.shape[1]
+        image.shape[0] * image.shape[1]
 
         # Directory để lưu debug images
         debug_dir = "face_debug"
@@ -2272,7 +2267,7 @@ def analyze_facial_expression_advanced(detections, img_data, depth_map=None, spo
                 # Phân tích đơn giản dựa trên độ tương phản và độ sáng
                 gray = cv2.cvtColor(face_img, cv2.COLOR_RGB2GRAY)
                 brightness = np.mean(gray) / 255.0
-                contrast = np.std(gray) / 128.0
+                np.std(gray) / 128.0
 
                 # Tính gradient (texture)
                 sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
@@ -2286,8 +2281,8 @@ def analyze_facial_expression_advanced(detections, img_data, depth_map=None, spo
                 bottom = gray[2 * h // 3:, :]  # Vùng miệng
 
                 # Tính các đặc trưng theo vùng
-                top_contrast = np.std(top) / 128.0
-                middle_contrast = np.std(middle) / 128.0
+                np.std(top) / 128.0
+                np.std(middle) / 128.0
                 bottom_contrast = np.std(bottom) / 128.0
 
                 # Khởi tạo điểm số cảm xúc
@@ -3006,8 +3001,8 @@ def visualize_sports_results(img_data, detections, depth_map, sports_analysis, a
         # Backup: nếu không tìm được bằng mask, dùng bounding box
         if main_subject_pose is None and main_person is not None:
             main_x1, main_y1, main_x2, main_y2 = main_person['box']
-            main_center_x = (main_x1 + main_x2) / 2
-            main_center_y = (main_y1 + main_y2) / 2
+            (main_x1 + main_x2) / 2
+            (main_y1 + main_y2) / 2
 
             # Tìm pose có bbox trùng nhiều nhất với main person box
             best_iou = 0
@@ -3659,13 +3654,11 @@ def generate_sports_caption(analysis_result):
 
     # Determine sport type based on name and equipment
     detected_sport = 'unknown'
-    sport_confidence = 0
 
     for sport_name, terms in sport_specific_terms.items():
         # Check sport name
         if sport_name in sport_type.lower():
             detected_sport = sport_name
-            sport_confidence = 0.8
             break
 
         # Check equipment
@@ -3673,13 +3666,11 @@ def generate_sports_caption(analysis_result):
             eq_lower = eq.lower()
             if sport_name in eq_lower or any(term.lower() in eq_lower for term in terms):
                 detected_sport = sport_name
-                sport_confidence = 0.6
                 break
 
     # If no specific sport found but "sports ball" is detected
     if detected_sport == 'unknown' and any('ball' in eq.lower() for eq in equipment):
         detected_sport = 'ball sport'
-        sport_confidence = 0.4
 
     # ----------------- 2. ANALYZE SCENE COMPLEXITY -----------------
     # Check if it's a crowded scene (many athletes close together)
