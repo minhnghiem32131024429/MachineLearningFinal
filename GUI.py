@@ -8,7 +8,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QGraphicsDropShadowEffect, QProgressBar, QComboBox, QMessageBox,
                              QSizePolicy, QFrame, QScrollArea, QGroupBox, QGridLayout,
                              QTableWidget, QTableWidgetItem)
-from PyQt5.QtGui import QPixmap, QColor, QBrush
+from PyQt5.QtGui import QPixmap, QColor, QBrush, QIcon
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtWidgets import QListWidget, QListWidgetItem, QGridLayout, QButtonGroup, QRadioButton
 try:
@@ -407,7 +407,7 @@ class BatchResultWidget(QWidget):
 class SportsAnalysisApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Sports Image Analysis Pro")
+        self.setWindowTitle("Sports Image Analyser")
         self.setMinimumSize(1200, 800)
         self.resize(1920, 1080)
         self.showMaximized()
@@ -709,7 +709,28 @@ class SportsAnalysisApp(QMainWindow):
         # Tab 9: Statistics
         self.tab_stats = QWidget()
         tab_stats_layout = QVBoxLayout(self.tab_stats)
+        self.caption_frame = QFrame()
+        self.caption_frame.setStyleSheet("""
+            QFrame {
+                background-color: #f0f8ff;
+                border-radius: 8px;
+                padding: 10px;
+                border-left: 4px solid #2196F3;
+                margin-bottom: 15px;
+            }
+        """)
+        caption_layout = QVBoxLayout(self.caption_frame)
 
+        caption_title = QLabel("📝 Image Caption")
+        caption_title.setStyleSheet("font-weight: bold; font-size: 16px; color: #2196F3;")
+        caption_layout.addWidget(caption_title)
+
+        self.caption_label = QLabel("Caption will appear here after analysis")
+        self.caption_label.setWordWrap(True)
+        self.caption_label.setStyleSheet("font-size: 14px; padding: 5px;")
+        caption_layout.addWidget(self.caption_label)
+
+        tab_stats_layout.addWidget(self.caption_frame)
         self.stats_label = QLabel("Statistics will appear here")
         self.stats_label.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         self.stats_label.setStyleSheet("""
@@ -909,6 +930,12 @@ class SportsAnalysisApp(QMainWindow):
             self.analysis_thread.error.connect(self.analysis_error)
             self.analysis_thread.start()
 
+    def copy_to_clipboard(self, text):
+        """Copy text to clipboard và hiển thị thông báo"""
+        clipboard = QApplication.clipboard()
+        clipboard.setText(text)
+        self.statusBar().showMessage("Caption copied to clipboard!", 3000)
+
     def update_batch_progress(self, current, total):
         """Cập nhật tiến trình batch"""
         progress = int((current / total) * 100)
@@ -972,18 +999,12 @@ class SportsAnalysisApp(QMainWindow):
         self.progress_bar.setValue(value)
 
     def analysis_finished(self, result):
-        """Xử lý khi phân tích hoàn thành"""
-        # Lưu kết quả
         self.analysis_results = result
-
-        # Tạo caption cho ảnh
         caption = generate_sports_caption(result)
         print(f"Generated caption: {caption}")
-
-        # Hiển thị caption ở statusBar
         self.statusBar().showMessage(f"Analysis complete. Caption: {caption}")
-
-        # Cập nhật UI với kết quả từng tab
+        self.caption_label.setText(caption)
+        self.caption_label.setStyleSheet("font-size: 14px; padding: 5px; color: #000000;")
         self.update_detection_tab(result)
         self.update_main_subject_tab(result)
         self.update_depth_tab(result)
@@ -992,36 +1013,25 @@ class SportsAnalysisApp(QMainWindow):
         self.update_face_tab(result)
         self.update_pose_tab(result)
         self.update_stats_tab(result)
-
-        # Kích hoạt lại các nút
         self.analyze_btn.setEnabled(True)
         self.upload_btn.setEnabled(True)
         self.progress_bar.setVisible(False)
-
         self.statusBar().showMessage("Analysis complete")
-
-        # Tự động chuyển đến tab detection sau khi phân tích xong
-        self.tabs.setCurrentIndex(1)  # 1 là tab Detection
+        self.tabs.setCurrentIndex(8)
 
     def analysis_error(self, error_message):
-        """Xử lý lỗi phân tích"""
         QMessageBox.critical(self, "Analysis Error", str(error_message))
-
-        # Kích hoạt lại các nút
         self.analyze_btn.setEnabled(True)
         self.upload_btn.setEnabled(True)
         self.progress_bar.setVisible(False)
-
         self.statusBar().showMessage("Analysis failed")
 
     def update_detection_tab(self, result):
-        """Cập nhật tab object detection"""
         detection_image = self.extract_component_image("detection")
         if detection_image:
             self.detection_image_display.set_image(detection_image)
 
     def update_main_subject_tab(self, result):
-        """Cập nhật tab main subject"""
         main_subject_image = self.extract_component_image("main_subject")
         if main_subject_image:
             self.main_subject_display.set_image(main_subject_image)
@@ -1165,10 +1175,124 @@ class SportsAnalysisApp(QMainWindow):
         if self.tab_stats.layout():
             QWidget().setLayout(self.tab_stats.layout())
 
-        # Tạo layout chính theo chiều dọc
+        # TẠO SCROLL AREA CHO TOÀN BỘ TAB STATISTICS
         main_layout = QVBoxLayout(self.tab_stats)
-        main_layout.setContentsMargins(20, 20, 20, 20)
-        main_layout.setSpacing(15)
+        main_layout.setContentsMargins(0, 0, 0, 0)  # Loại bỏ margin của tab chính
+
+        # Tạo scroll area
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background-color: transparent;
+            }
+            QScrollBar:vertical {
+                background-color: #f0f0f0;
+                width: 12px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #c0c0c0;
+                border-radius: 6px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background-color: #a0a0a0;
+            }
+        """)
+
+        # Tạo widget nội dung chính cho scroll area
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(20, 20, 20, 20)
+        scroll_layout.setSpacing(15)
+
+        # Set scroll content vào scroll area
+        scroll_area.setWidget(scroll_content)
+        main_layout.addWidget(scroll_area)
+
+        # THAY THẾ TẤT CẢ "main_layout" BẰNG "scroll_layout" TRONG PHẦN TIẾP THEO
+
+        # THÊM VÀO ĐÂY: Caption Display in Stats Tab trong hàm update_stats_tab
+        caption_group = QGroupBox("📝 Image Caption")
+        caption_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                font-size: 21px;
+                border: 2px solid #2196F3;
+                border-radius: 8px;
+                margin-top: 15px;
+                padding-top: 15px;
+                background-color: white;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                left: 15px;
+                top: -8px;
+                padding: 10px 8px 4px 8px;
+                color: #2196F3;
+                font-size: 21px;
+                font-weight: bold;
+                background-color: white;
+                border: 1px solid #2196F3;
+                border-radius: 4px;
+            }
+        """)
+
+        caption_layout = QVBoxLayout(caption_group)
+        caption_layout.setContentsMargins(15, 20, 15, 15)
+
+        # Tạo header với title và nút copy
+        caption_header = QHBoxLayout()
+        caption_title = QLabel("Image Caption:")
+        caption_title.setStyleSheet("font-weight: bold; color: #2196F3; background: transparent; border: none;")
+        caption_header.addWidget(caption_title)
+        caption_header.addStretch()
+
+        # Nút copy caption
+        copy_button = QPushButton()
+        copy_button.setIcon(QIcon.fromTheme("edit-copy"))
+        copy_button.setText("Copy")
+        copy_button.setToolTip("Copy caption to clipboard")
+        copy_button.setStyleSheet("""
+            QPushButton {
+                background-color: #e3f2fd;
+                border: 1px solid #90caf9;
+                border-radius: 4px;
+                padding: 4px 10px;
+                color: #1976d2;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #bbdefb;
+            }
+        """)
+        copy_button.clicked.connect(lambda: self.copy_to_clipboard(result.get('caption', "")))
+        caption_header.addWidget(copy_button)
+
+        caption_layout.addLayout(caption_header)
+
+        # Caption text trong khung
+        caption_text = result.get('caption', "No caption available")
+        caption_label = QLabel(caption_text)
+        caption_label.setStyleSheet("""
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+            border-left: 4px solid #2196F3;
+            font-size: 14px;
+            line-height: 1.5;
+            color: #212529;
+        """)
+        caption_label.setWordWrap(True)
+
+        caption_layout.addWidget(caption_label)
+        main_layout.addWidget(caption_group)
+        # KẾT THÚC THÊM
 
         # 1. Summary GroupBox
         summary_group = QGroupBox("📊 Tổng quan phân tích")
@@ -1236,7 +1360,7 @@ class SportsAnalysisApp(QMainWindow):
         if equipment:
             create_info_label("🏈 Equipment:", ', '.join(equipment), 2, 0)
 
-        main_layout.addWidget(summary_group)
+        scroll_layout.addWidget(summary_group)
 
         # 2. Object Table GroupBox
         if 'sports_analysis' in result and 'key_subjects' in result['sports_analysis']:
@@ -1350,11 +1474,12 @@ class SportsAnalysisApp(QMainWindow):
                 table.setMinimumHeight(150)
 
                 table_layout.addWidget(table)
-                main_layout.addWidget(table_group)
+                scroll_layout.addWidget(table_group)
 
-        # 3. Emotion & Suggestion Layout (chia đôi)
+        # 3. Emotion & Suggestion Layout (chia đôi - GIỮ LAYOUT NGANG)
         emotion_suggestion_layout = QHBoxLayout()
         emotion_suggestion_layout.setSpacing(15)
+        emotion_suggestion_layout.setContentsMargins(0, 0, 0, 20)  # Tăng margin bottom
 
         # 3.1. Emotion Analysis (50%)
         emotion_group = QGroupBox("😊 Facial Expression Analysis")
@@ -1367,15 +1492,16 @@ class SportsAnalysisApp(QMainWindow):
                 margin-top: 15px;
                 padding-top: 15px;
                 background-color: white;
+                max-height: 400px;  /* THU NHỎ CHIỀU CAO */
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
                 subcontrol-position: top left;
                 left: 15px;
                 top: -8px;
-                padding: 10px 8px 4px 8px;
+                padding: 8px 6px 3px 6px;  /* THU NHỎ PADDING */
                 color: #9C27B0;
-                font-size: 16px;
+                font-size: 14px;  /* THU NHỎ FONT SIZE */
                 font-weight: bold;
                 background-color: white;
                 border: 1px solid #9C27B0;
@@ -1384,8 +1510,8 @@ class SportsAnalysisApp(QMainWindow):
         """)
 
         emotion_layout = QVBoxLayout(emotion_group)
-        emotion_layout.setContentsMargins(15, 20, 15, 15)
-        emotion_layout.setSpacing(10)
+        emotion_layout.setContentsMargins(10, 15, 10, 10)
+        emotion_layout.setSpacing(5)
 
         if 'facial_analysis' in result and result['facial_analysis'].get('has_faces', False):
             facial = result['facial_analysis']
@@ -1395,48 +1521,36 @@ class SportsAnalysisApp(QMainWindow):
             emotion_container.setStyleSheet("""
                 background: linear-gradient(135deg, #fff3e0, #ffe0b2);
                 border-radius: 8px;
-                padding: 15px;
+                padding: 10px;  /* GIẢM PADDING */
                 border-left: 4px solid #FF9800;
             """)
 
             emotion_info_layout = QVBoxLayout(emotion_container)
-            emotion_info_layout.setSpacing(10)
+            emotion_info_layout.setSpacing(5)
+            emotion_info_layout.setContentsMargins(5, 5, 5, 5)
 
             # Emotion header với icon nhỏ hơn
             emotion_header = QHBoxLayout()
 
             dominant_emotion = facial.get('dominant_emotion', 'unknown')
-            emotion_icons = {
-                'happy': '😊', 'sad': '😢', 'angry': '😠', 'surprise': '😲',
-                'fear': '😨', 'disgust': '🤢', 'neutral': '😐',
-                'determination': '💪', 'focus': '🎯'
-            }
-
-            emotion_icon = emotion_icons.get(dominant_emotion.lower(), '😐')
-
-            icon_label = QLabel(emotion_icon)
-            icon_label.setStyleSheet("font-size: 36px; background: transparent;")
-            icon_label.setAlignment(Qt.AlignCenter)
-            icon_label.setFixedSize(80, 80)  # Tăng từ 50x50 lên 60x60
 
             # Emotion name và info
             emotion_info_widget = QWidget()
             emotion_detail_layout = QVBoxLayout(emotion_info_widget)
-            emotion_detail_layout.setSpacing(3)
+            emotion_detail_layout.setSpacing(2)
+            emotion_detail_layout.setContentsMargins(0, 0, 0, 0)
 
             emotion_name = QLabel(dominant_emotion.title())
-            emotion_name.setStyleSheet("font-size: 16px; font-weight: bold; color: #495057;")
+            emotion_name.setStyleSheet("font-size: 14px; font-weight: bold; color: #495057;")
 
             emotion_subtitle = QLabel("Dominant Emotion")
             emotion_subtitle.setStyleSheet("color: #6c757d; font-size: 11px;")
 
             emotion_detail_layout.addWidget(emotion_name)
             emotion_detail_layout.addWidget(emotion_subtitle)
-
-            emotion_header.addWidget(icon_label)
             emotion_header.addWidget(emotion_info_widget, 1)
-            emotion_header.setSpacing(15)  # **THÊM DÒNG NÀY**
-            emotion_header.setContentsMargins(5, 5, 5, 5)  # **THÊM DÒNG NÀY**
+            emotion_header.setSpacing(10)
+            emotion_header.setContentsMargins(2, 2, 2, 2)
 
             emotion_info_layout.addLayout(emotion_header)
 
@@ -1445,18 +1559,20 @@ class SportsAnalysisApp(QMainWindow):
             emotional_value = facial.get('emotional_value', 'Unknown')
 
             metrics_layout = QHBoxLayout()
+            metrics_layout.setSpacing(5)
 
             # Intensity
             intensity_widget = QWidget()
             intensity_widget.setStyleSheet("""
-                background: white; border-radius: 4px; padding: 8px; border: 1px solid #dee2e6;
+                background: white; border-radius: 4px; padding: 4px; border: 1px solid #dee2e6;
             """)
             intensity_layout = QVBoxLayout(intensity_widget)
             intensity_layout.setAlignment(Qt.AlignCenter)
-            intensity_layout.setSpacing(2)
+            intensity_layout.setSpacing(0)
+            intensity_layout.setContentsMargins(2, 2, 2, 2)
 
             intensity_value = QLabel(f"{emotion_intensity:.2f}")
-            intensity_value.setStyleSheet("font-size: 14px; font-weight: bold; color: #2196F3;")
+            intensity_value.setStyleSheet("font-size: 13px; font-weight: bold; color: #2196F3;")
             intensity_value.setAlignment(Qt.AlignCenter)
 
             intensity_label = QLabel("Intensity")
@@ -1469,15 +1585,17 @@ class SportsAnalysisApp(QMainWindow):
             # Value
             value_widget = QWidget()
             value_widget.setStyleSheet("""
-                background: white; border-radius: 4px; padding: 8px; border: 1px solid #dee2e6;
+                background: white; border-radius: 4px; padding: 4px; border: 1px solid #dee2e6;
             """)
             value_layout = QVBoxLayout(value_widget)
             value_layout.setAlignment(Qt.AlignCenter)
-            value_layout.setSpacing(2)
-
+            value_layout.setSpacing(0)
+            value_layout.setContentsMargins(2, 2, 2, 2)
             value_value = QLabel(emotional_value)
             value_value.setStyleSheet("font-size: 14px; font-weight: bold; color: #2196F3;")
             value_value.setAlignment(Qt.AlignCenter)
+            value_value.setMinimumWidth(80)  # Đảm bảo đủ chiều rộng
+            value_value.setTextInteractionFlags(Qt.TextSelectableByMouse)  # Cho phép chọn text
 
             value_label = QLabel("Value")
             value_label.setStyleSheet("font-size: 9px; color: #6c757d;")
@@ -1496,12 +1614,13 @@ class SportsAnalysisApp(QMainWindow):
             if 'original_emotion' in facial and facial['original_emotion'] != dominant_emotion:
                 original_widget = QWidget()
                 original_widget.setStyleSheet("""
-                    background: rgba(255,193,7,0.1); border-radius: 4px; padding: 8px; border: 1px solid #FFC107;
+                    background: rgba(255,193,7,0.1); border-radius: 4px; padding: 4px; border: 1px solid #FFC107;
                 """)
                 original_layout = QHBoxLayout(original_widget)
+                original_layout.setContentsMargins(5, 2, 5, 2)
 
                 original_label = QLabel(f"Original: {facial['original_emotion']}")
-                original_label.setStyleSheet("font-weight: bold; color: #495057; font-size: 12px;")
+                original_label.setStyleSheet("font-weight: bold; color: #495057; font-size: 11px;")
 
                 original_layout.addWidget(original_label)
                 emotion_layout.addWidget(original_widget)
@@ -1510,18 +1629,20 @@ class SportsAnalysisApp(QMainWindow):
             # No face detected (compact)
             no_face_widget = QWidget()
             no_face_widget.setStyleSheet("""
-                background: #f8f9fa; border-radius: 6px; padding: 20px; border: 2px dashed #dee2e6;
+                background: #f8f9fa; border-radius: 6px; padding: 10px; border: 1px dashed #dee2e6;
             """)
 
             no_face_layout = QVBoxLayout(no_face_widget)
             no_face_layout.setAlignment(Qt.AlignCenter)
+            no_face_layout.setContentsMargins(5, 5, 5, 5)
+            no_face_layout.setSpacing(2)
 
             no_face_icon = QLabel("😔")
-            no_face_icon.setStyleSheet("font-size: 32px;")
+            no_face_icon.setStyleSheet("font-size: 24px;")
             no_face_icon.setAlignment(Qt.AlignCenter)
 
             no_face_text = QLabel("No face detected")
-            no_face_text.setStyleSheet("font-size: 14px; color: #6c757d; font-style: italic;")
+            no_face_text.setStyleSheet("font-size: 12px; color: #6c757d; font-style: italic;")
             no_face_text.setAlignment(Qt.AlignCenter)
 
             no_face_layout.addWidget(no_face_icon)
@@ -1540,15 +1661,16 @@ class SportsAnalysisApp(QMainWindow):
                 margin-top: 15px;
                 padding-top: 15px;
                 background-color: white;
+                max-height: 400px;  /* THU NHỎ CHIỀU CAO */
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
                 subcontrol-position: top left;
                 left: 15px;
                 top: -8px;
-                padding: 10px 8px 4px 8px;
+                padding: 8px 6px 3px 6px;  /* THU NHỎ PADDING */
                 color: #4CAF50;
-                font-size: 16px;
+                font-size: 14px;  /* THU NHỎ FONT SIZE */
                 font-weight: bold;
                 background-color: white;
                 border: 1px solid #4CAF50;
@@ -1557,10 +1679,9 @@ class SportsAnalysisApp(QMainWindow):
         """)
 
         suggestions_layout = QVBoxLayout(suggestions_group)
-        suggestions_layout.setContentsMargins(15, 20, 15, 15)
-        suggestions_layout.setSpacing(8)
+        suggestions_layout.setContentsMargins(10, 15, 10, 10)
+        suggestions_layout.setSpacing(5)
 
-        # **THAY THẾ TẤT CẢ ĐOẠN GENERATE SUGGESTIONS BẰNG:**
         # Import hàm từ ML_1
         from ML_1 import generate_smart_suggestion
 
@@ -1600,52 +1721,34 @@ class SportsAnalysisApp(QMainWindow):
             suggestion_widget.setStyleSheet("""
                 background: #f8f9fa;
                 border-radius: 8px;
-                padding: 15px;
+                padding: 10px;  /* GIẢM PADDING */
                 border-left: 4px solid #4CAF50;
-                margin: 5px 0px;
-                min-height: 80px;
+                margin: 2px 0px;  /* GIẢM MARGIN */
             """)
 
             suggestion_layout = QHBoxLayout(suggestion_widget)
-            suggestion_layout.setSpacing(10)
-
-            # Icon
-            icon_label = QLabel(suggestion['icon'])
-            icon_label.setStyleSheet("font-size: 32px; background: transparent; border: none;")
-            icon_label.setAlignment(Qt.AlignCenter)
-            icon_label.setFixedSize(80, 80)  # Tăng từ 50x50 lên 60x60
+            suggestion_layout.setSpacing(5)
 
             # Content
             content_widget = QWidget()
             content_layout = QVBoxLayout(content_widget)
             content_layout.setSpacing(2)
             content_layout.setContentsMargins(0, 0, 0, 0)
-
             title_label = QLabel(suggestion['title'])
-            title_label.setStyleSheet("font-weight: bold; color: #495057; font-size: 21px;")
-
+            title_label.setStyleSheet("font-weight: bold; color: #495057; font-size: 14px;")
             desc_label = QLabel(suggestion['desc'])
             desc_label.setStyleSheet("color: #495057; font-size: 14px; line-height: 1.4;")
             desc_label.setWordWrap(True)
-
+            desc_label.setMinimumHeight(50)  # Đảm bảo có đủ chiều cao
+            desc_label.setTextInteractionFlags(Qt.TextSelectableByMouse)  # Cho phép chọn text
             content_layout.addWidget(title_label)
             content_layout.addWidget(desc_label)
-
-            suggestion_layout.addWidget(icon_label)
             suggestion_layout.addWidget(content_widget, 1)
-            suggestion_layout.setSpacing(20)  # Tăng từ 15 lên 20
-            suggestion_layout.setContentsMargins(5, 10, 5, 10)  # **THÊM DÒNG NÀY**
-
+            suggestion_layout.setContentsMargins(5, 5, 5, 5)
             suggestions_layout.addWidget(suggestion_widget)
-
-        # Add both groups to horizontal layout
         emotion_suggestion_layout.addWidget(emotion_group)
         emotion_suggestion_layout.addWidget(suggestions_group)
-
-        main_layout.addLayout(emotion_suggestion_layout)
-
-        # Thêm stretch để đẩy nội dung lên trên
-        main_layout.addStretch()
+        scroll_layout.addLayout(emotion_suggestion_layout)
 
     def change_theme(self, index):
         """Thay đổi chủ đề của ứng dụng"""

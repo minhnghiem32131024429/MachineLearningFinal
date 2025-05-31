@@ -3172,17 +3172,28 @@ def visualize_sports_results(img_data, detections, depth_map, sports_analysis, a
 
             # Vẽ skeleton
             for kp1_id, kp2_id in skeleton:
+                # CHỈ kết nối các keypoint có confidence đủ cao
                 if kp1_id in keypoints and kp2_id in keypoints:
                     pt1 = keypoints[kp1_id]
                     pt2 = keypoints[kp2_id]
 
-                    # Kiểm tra khoảng cách để tránh vẽ các đường quá dài
+                    # Kiểm tra khoảng cách để tránh vẽ các đường quá dài - GIẢM NGƯỠNG XUỐNG
                     distance = np.sqrt(((pt1[0] - pt2[0]) ** 2) + ((pt1[1] - pt2[1]) ** 2))
-                    # Khoảng cách tối đa hợp lý giữa các keypoint (có thể điều chỉnh)
-                    max_distance = width * 0.5  # 50% chiều rộng ảnh
+                    # Khoảng cách tối đa hợp lý giữa các keypoint (GIẢM XUỐNG 30%)
+                    max_distance = width * 0.3  # Giảm từ 50% xuống 30% chiều rộng ảnh
 
-                    if distance > max_distance:
-                        continue  # Bỏ qua các skeleton quá dài
+                    # THÊM: Kiểm tra confidence của cả hai điểm trong dict ban đầu
+                    kp1_conf = 0
+                    kp2_conf = 0
+                    for kp in person['keypoints']:
+                        if kp['id'] == kp1_id:
+                            kp1_conf = kp['confidence']
+                        if kp['id'] == kp2_id:
+                            kp2_conf = kp['confidence']
+
+                    # CHỈ vẽ khi cả 2 điểm đều có confidence cao
+                    if kp1_conf < 0.2 or kp2_conf < 0.2 or distance > max_distance:
+                        continue  # Bỏ qua các skeleton khi có điểm kém tin cậy hoặc quá dài
 
                     # Sử dụng màu khác nhau cho các phần khác nhau của cơ thể
                     if (kp1_id <= 4 and kp2_id <= 4):  # Phần đầu
