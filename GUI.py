@@ -1140,8 +1140,23 @@ class SportsAnalysisApp(QMainWindow):
                 self.analysis_results['caption'] = new_caption
                 print("DEBUG: Đã cập nhật caption trong kết quả phân tích")
 
-            # Cập nhật lại tab Statistics để hiển thị caption mới
-            self.update_stats_tab(self.analysis_results)
+            # Cập nhật caption label mới nếu có
+            if hasattr(self, 'current_caption_label'):
+                try:
+                    self.current_caption_label.setText(new_caption)
+                    print("DEBUG: Đã cập nhật current_caption_label")
+                except RuntimeError:
+                    print("DEBUG: current_caption_label đã bị xóa, rebuild tab")
+                    self.update_stats_tab(self.analysis_results)
+
+            # Cập nhật caption label cũ nếu có và vẫn tồn tại
+            if hasattr(self, 'caption_label'):
+                try:
+                    self.caption_label.setText(new_caption)
+                    self.caption_label.setStyleSheet("font-size: 14px; padding: 5px; color: #000000;")
+                    print("DEBUG: Đã cập nhật caption_label cũ")
+                except RuntimeError:
+                    print("DEBUG: caption_label cũ đã bị xóa")
 
             # Hiển thị thông báo thành công
             self.statusBar().showMessage("Đã tạo lại caption thành công", 3000)
@@ -1387,11 +1402,28 @@ class SportsAnalysisApp(QMainWindow):
 
     def analysis_finished(self, result):
         self.analysis_results = result
-        caption = generate_sports_caption(result)
-        print(f"Generated caption: {caption}")
-        self.statusBar().showMessage(f"Analysis complete. Caption: {caption}")
-        self.caption_label.setText(caption)
-        self.caption_label.setStyleSheet("font-size: 14px; padding: 5px; color: #000000;")
+
+        # Tạo caption và lưu vào result
+        try:
+            caption = generate_sports_caption(result)
+            result['caption'] = caption  # Lưu caption vào result
+            print(f"Generated caption: {caption}")
+            self.statusBar().showMessage(f"Analysis complete. Caption: {caption}")
+
+            # Cập nhật caption label cũ nếu có và vẫn tồn tại
+            if hasattr(self, 'caption_label'):
+                try:
+                    self.caption_label.setText(caption)
+                    self.caption_label.setStyleSheet("font-size: 14px; padding: 5px; color: #000000;")
+                except RuntimeError:
+                    # QLabel đã bị xóa, bỏ qua
+                    pass
+        except Exception as e:
+            print(f"Error generating caption: {e}")
+            caption = "Error generating caption"
+            result['caption'] = caption
+
+        # Cập nhật các tab khác
         self.update_detection_tab(result)
         self.update_main_subject_tab(result)
         self.update_depth_tab(result)
@@ -1399,7 +1431,9 @@ class SportsAnalysisApp(QMainWindow):
         self.update_composition_tab(result)
         self.update_face_tab(result)
         self.update_pose_tab(result)
-        self.update_stats_tab(result)
+        self.update_stats_tab(result)  # Gọi cuối cùng để tạo caption label mới
+
+        # Kích hoạt lại các nút
         self.analyze_btn.setEnabled(True)
         self.upload_btn.setEnabled(True)
         self.progress_bar.setVisible(False)
@@ -1558,9 +1592,16 @@ class SportsAnalysisApp(QMainWindow):
     def update_stats_tab(self, result):
         """Cập nhật tab thống kê với giao diện widget đẹp hơn"""
 
-        # Xóa layout cũ nếu có
-        if self.tab_stats.layout():
-            QWidget().setLayout(self.tab_stats.layout())
+        # XÓA AN TOÀN LAYOUT CŨ
+        old_layout = self.tab_stats.layout()
+        if old_layout:
+            # Xóa tất cả widget con trước
+            while old_layout.count():
+                child = old_layout.takeAt(0)
+                if child.widget():
+                    child.widget().deleteLater()
+            # Xóa layout
+            QWidget().setLayout(old_layout)
 
         # TẠO SCROLL AREA CHO TOÀN BỘ TAB STATISTICS
         main_layout = QVBoxLayout(self.tab_stats)
@@ -1601,9 +1642,7 @@ class SportsAnalysisApp(QMainWindow):
         scroll_area.setWidget(scroll_content)
         main_layout.addWidget(scroll_area)
 
-        # THAY THẾ TẤT CẢ "main_layout" BẰNG "scroll_layout" TRONG PHẦN TIẾP THEO
-
-        # THÊM VÀO ĐÂY: Caption Display in Stats Tab trong hàm update_stats_tab
+        # CAPTION DISPLAY - SỬ DỤNG CAPTION ĐÃ TẠO
         caption_group = QGroupBox("📝 Image Caption")
         caption_group.setStyleSheet("""
             QGroupBox {
@@ -1658,12 +1697,24 @@ class SportsAnalysisApp(QMainWindow):
                 background-color: #bbdefb;
             }
         """)
-        # Lấy caption từ kết quả analysis
-        analysis_caption = ""
-        if hasattr(self, 'analysis_results') and self.analysis_results:
-            analysis_caption = generate_sports_caption(self.analysis_results)
-        copy_button.clicked.connect(lambda: self.copy_to_clipboard(analysis_caption))
+
+        # SỬ DỤNG CAPTION TỪ KẾT QUẢ PHÂN TÍCH HOẶC ĐÃ TẠO
+        current_caption = ""
+        if 'caption' in result:
+            current_caption = result['caption']
+        elif hasattr(self, 'analysis_results') and self.analysis_results and 'caption' in self.analysis_results:
+            current_caption = self.analysis_results['caption']
+        else:
+            # Tạo caption mới nếu chưa có
+            try:
+                current_caption = generate_sports_caption(result)
+                result['caption'] = current_caption  # Lưu lại để dùng sau
+            except Exception as e:
+                current_caption = f"Error generating caption: {str(e)}"
+
+        copy_button.clicked.connect(lambda: self.copy_to_clipboard(current_caption))
         caption_header.addWidget(copy_button)
+
         # Nút recreate caption
         recreate_button = QPushButton()
         recreate_button.setIcon(QIcon.fromTheme("view-refresh"))
@@ -1687,9 +1738,8 @@ class SportsAnalysisApp(QMainWindow):
         caption_layout.addLayout(caption_header)
 
         # Caption text trong khung
-        caption_text = result.get('caption', "No caption available")
-        caption_label = QLabel(caption_text)
-        caption_label.setStyleSheet("""
+        self.current_caption_label = QLabel(current_caption)
+        self.current_caption_label.setStyleSheet("""
             background-color: #f8f9fa;
             padding: 15px;
             border-radius: 6px;
@@ -1698,38 +1748,37 @@ class SportsAnalysisApp(QMainWindow):
             line-height: 1.5;
             color: #212529;
         """)
-        caption_label.setWordWrap(True)
+        self.current_caption_label.setWordWrap(True)
 
-        caption_layout.addWidget(caption_label)
-        main_layout.addWidget(caption_group)
-        # KẾT THÚC THÊM
+        caption_layout.addWidget(self.current_caption_label)
+        scroll_layout.addWidget(caption_group)
 
         # 1. Summary GroupBox
         summary_group = QGroupBox("📊 Tổng quan phân tích")
         summary_group.setStyleSheet("""
-                QGroupBox {
-                    font-weight: bold;
-                    font-size: 21px;
-                    border: 2px solid #2196F3;
-                    border-radius: 8px;
-                    margin-top: 15px;
-                    padding-top: 15px;
-                    background-color: white;
-                }
-                QGroupBox::title {
-                    subcontrol-origin: margin;
-                    subcontrol-position: top left;
-                    left: 15px;
-                    top: -8px;
-                    padding: 10px 8px 4px 8px;
-                    color: #2196F3;
-                    font-size: 21px;
-                    font-weight: bold;
-                    background-color: white;
-                    border: 1px solid #2196F3;
-                    border-radius: 4px;
-                }
-            """)
+            QGroupBox {
+                font-weight: bold;
+                font-size: 21px;
+                border: 2px solid #2196F3;
+                border-radius: 8px;
+                margin-top: 15px;
+                padding-top: 15px;
+                background-color: white;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                left: 15px;
+                top: -8px;
+                padding: 10px 8px 4px 8px;
+                color: #2196F3;
+                font-size: 21px;
+                font-weight: bold;
+                background-color: white;
+                border: 1px solid #2196F3;
+                border-radius: 4px;
+            }
+        """)
 
         summary_layout = QGridLayout(summary_group)
         summary_layout.setContentsMargins(15, 20, 15, 15)
@@ -2156,6 +2205,7 @@ class SportsAnalysisApp(QMainWindow):
             suggestion_layout.addWidget(content_widget, 1)
             suggestion_layout.setContentsMargins(5, 5, 5, 5)
             suggestions_layout.addWidget(suggestion_widget)
+
         emotion_suggestion_layout.addWidget(emotion_group)
         emotion_suggestion_layout.addWidget(suggestions_group)
         scroll_layout.addLayout(emotion_suggestion_layout)
