@@ -415,6 +415,25 @@ class BatchResultWidget(QWidget):
         copy_path_btn.clicked.connect(lambda: self.copy_to_clipboard(image_path, "File path"))
         header_layout.addWidget(copy_path_btn)
 
+        # **THÊM BLOCK NÀY:** Nút recreate caption cho batch item
+        recreate_caption_btn = QPushButton("🔄 Recreate")
+        recreate_caption_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #FF9800;
+                color: white;
+                border: none;
+                padding: 5px 10px;
+                border-radius: 3px;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #F57C00;
+            }
+        """)
+        recreate_caption_btn.clicked.connect(lambda: self.recreate_batch_caption(result_data))
+        header_layout.addWidget(recreate_caption_btn)
+        # **KẾT THÚC THÊM**
+
         info_layout.addLayout(header_layout)
 
         # Caption
@@ -514,7 +533,6 @@ class BatchResultWidget(QWidget):
 
         return result_card
 
-    # **THÊM HÀM MỚI:** Copy to clipboard
     def copy_to_clipboard(self, text, data_type):
         """Copy text to clipboard và hiển thị thông báo"""
         try:
@@ -528,7 +546,39 @@ class BatchResultWidget(QWidget):
         except Exception as e:
             print(f"Error copying to clipboard: {e}")
 
-    # **THÊM HÀM MỚI:** Format scores để copy
+    def recreate_single_caption(self):
+        """Tạo lại caption cho single image"""
+        if not hasattr(self, 'analysis_results') or not self.analysis_results:
+            self.statusBar().showMessage("No analysis results available", 3000)
+            return
+
+        try:
+            # Import hàm từ ML_1
+            from ML_1 import generate_sports_caption
+
+            # Tạo caption mới
+            new_caption = generate_sports_caption(self.analysis_results)
+
+            # Cập nhật display
+            self.caption_label.setText(new_caption)
+            self.caption_label.setStyleSheet("font-size: 14px; padding: 5px; color: #000000;")
+
+            # Cập nhật lại toàn bộ stats tab với caption mới
+            self.analysis_results['caption'] = new_caption
+
+            # Cập nhật stats tab một cách an toàn
+            try:
+                self.update_stats_tab(self.analysis_results)
+            except Exception as e:
+                print(f"Error updating stats tab after recreate: {e}")
+
+            # Hiển thị thông báo
+            self.statusBar().showMessage("Caption recreated successfully!", 3000)
+
+        except Exception as e:
+            self.statusBar().showMessage(f"Error recreating caption: {str(e)}", 5000)
+            print(f"Error in recreate_single_caption: {e}")
+
     def format_scores_for_copy(self, scores):
         """Format scores thành text để copy"""
         lines = []
@@ -606,6 +656,43 @@ class BatchResultWidget(QWidget):
 
         # Cập nhật số lượng
         self.count_label.setText(f"{len(self.results)} results")
+
+    def recreate_batch_caption(self, result_data):
+        """Tạo lại caption cho một item trong batch"""
+        try:
+            # Import hàm từ ML_1
+            from ML_1 import generate_sports_caption
+
+            # Kiểm tra có kết quả analysis không
+            if result_data['result'] is None:
+                print("No analysis result available for this image")
+                return
+
+            # Tạo caption mới
+            new_caption = generate_sports_caption(result_data['result'])
+
+            # Cập nhật caption trong data
+            result_data['caption'] = new_caption
+
+            # Tìm và cập nhật trong all_results
+            for i, result in enumerate(self.all_results):
+                if result['path'] == result_data['path']:
+                    self.all_results[i]['caption'] = new_caption
+                    break
+
+            # Tìm và cập nhật trong results hiện tại
+            for i, result in enumerate(self.results):
+                if result['path'] == result_data['path']:
+                    self.results[i]['caption'] = new_caption
+                    break
+
+            # Refresh hiển thị để cập nhật caption mới
+            self.refresh_display()
+
+            print(f"Caption recreated for: {os.path.basename(result_data['path'])}")
+
+        except Exception as e:
+            print(f"Error recreating caption for {result_data['path']}: {str(e)}")
 
     def clear_results(self):
         # **THAY THẾ TOÀN BỘ HÀM NÀY:**
@@ -1024,6 +1111,25 @@ class SportsAnalysisApp(QMainWindow):
         batch_header_layout.addWidget(batch_title)
         batch_header_layout.addStretch()
 
+        # **THÊM BLOCK NÀY:** Nút recreate all captions
+        self.recreate_all_btn = QPushButton("🔄 Recreate All")
+        self.recreate_all_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #FF9800;
+                color: white;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 8px 16px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #F57C00;
+            }
+        """)
+        self.recreate_all_btn.clicked.connect(self.recreate_all_batch_captions)
+        batch_header_layout.addWidget(self.recreate_all_btn)
+        # **KẾT THÚC THÊM**
+
         self.export_btn = QPushButton("Export Results")
         self.export_btn.setStyleSheet("""
             QPushButton {
@@ -1117,6 +1223,10 @@ class SportsAnalysisApp(QMainWindow):
 
             if file_path:
                 try:
+                    # **THÊM BLOCK NÀY:** Reset trạng thái khi chọn ảnh mới
+                    self.reset_single_mode_state()
+                    # **KẾT THÚC THÊM**
+
                     # Hiển thị ảnh xem trước
                     pixmap = QPixmap(file_path)
                     pixmap = pixmap.scaled(self.preview_image.width(), 300, Qt.KeepAspectRatio, Qt.SmoothTransformation)
@@ -1189,6 +1299,64 @@ class SportsAnalysisApp(QMainWindow):
             self.analysis_thread.error.connect(self.analysis_error)
             self.analysis_thread.start()
 
+    def reset_single_mode_state(self):
+        """Reset trạng thái khi chọn ảnh mới trong single mode"""
+        try:
+            # Reset analysis results
+            self.analysis_results = None
+
+            # Reset caption
+            self.caption_label.setText("Caption will appear here after analysis")
+            self.caption_label.setStyleSheet("font-size: 14px; padding: 5px; color: #757575;")
+
+            # Reset tất cả tabs về trạng thái ban đầu
+            self.reset_all_display_tabs()
+
+            # Reset emotion chart
+            if hasattr(self, 'emotion_chart'):
+                self.emotion_chart.update_chart({})
+
+            # Reset emotion label
+            self.emotion_label.setText("No emotion detected")
+
+            # Reset face image
+            self.face_image.setText("No face detected")
+
+            # Reset stats tab - CHỈ reset label cũ, không xóa toàn bộ tab
+            if hasattr(self, 'stats_label'):
+                self.stats_label.setText("Statistics will appear here")
+
+            print("Single mode state reset completed")
+
+        except Exception as e:
+            print(f"Error in reset_single_mode_state: {e}")
+
+    def reset_all_display_tabs(self):
+        """Reset tất cả display tabs về trạng thái ban đầu"""
+        try:
+            # Reset detection tab
+            self.detection_image_display.set_image(None)
+
+            # Reset main subject tab
+            self.main_subject_display.set_image(None)
+
+            # Reset depth tab
+            self.depth_image_display.set_image(None)
+
+            # Reset sharpness tab
+            self.sharpness_image_display.set_image(None)
+
+            # Reset composition tab
+            self.composition_image_display.set_image(None)
+
+            # Reset pose tab
+            self.pose_image_display.set_image(None)
+
+            print("All display tabs reset completed")
+
+        except Exception as e:
+            print(f"Error in reset_all_display_tabs: {e}")
+
     def copy_to_clipboard(self, text):
         """Copy text to clipboard và hiển thị thông báo"""
         clipboard = QApplication.clipboard()
@@ -1258,25 +1426,71 @@ class SportsAnalysisApp(QMainWindow):
         self.progress_bar.setValue(value)
 
     def analysis_finished(self, result):
-        self.analysis_results = result
-        caption = generate_sports_caption(result)
-        print(f"Generated caption: {caption}")
-        self.statusBar().showMessage(f"Analysis complete. Caption: {caption}")
-        self.caption_label.setText(caption)
-        self.caption_label.setStyleSheet("font-size: 14px; padding: 5px; color: #000000;")
-        self.update_detection_tab(result)
-        self.update_main_subject_tab(result)
-        self.update_depth_tab(result)
-        self.update_sharpness_tab(result)
-        self.update_composition_tab(result)
-        self.update_face_tab(result)
-        self.update_pose_tab(result)
-        self.update_stats_tab(result)
-        self.analyze_btn.setEnabled(True)
-        self.upload_btn.setEnabled(True)
-        self.progress_bar.setVisible(False)
-        self.statusBar().showMessage("Analysis complete")
-        self.tabs.setCurrentIndex(8)
+        try:
+            self.analysis_results = result
+
+            # Tạo caption an toàn
+            try:
+                caption = generate_sports_caption(result)
+                print(f"Generated caption: {caption}")
+            except Exception as e:
+                print(f"Error generating caption: {e}")
+                caption = "Error generating caption"
+
+            self.statusBar().showMessage(f"Analysis complete. Caption: {caption}")
+            self.caption_label.setText(caption)
+            self.caption_label.setStyleSheet("font-size: 14px; padding: 5px; color: #000000;")
+
+            # Cập nhật từng tab một cách an toàn
+            try:
+                self.update_detection_tab(result)
+            except Exception as e:
+                print(f"Error updating detection tab: {e}")
+
+            try:
+                self.update_main_subject_tab(result)
+            except Exception as e:
+                print(f"Error updating main subject tab: {e}")
+
+            try:
+                self.update_depth_tab(result)
+            except Exception as e:
+                print(f"Error updating depth tab: {e}")
+
+            try:
+                self.update_sharpness_tab(result)
+            except Exception as e:
+                print(f"Error updating sharpness tab: {e}")
+
+            try:
+                self.update_composition_tab(result)
+            except Exception as e:
+                print(f"Error updating composition tab: {e}")
+
+            try:
+                self.update_face_tab(result)
+            except Exception as e:
+                print(f"Error updating face tab: {e}")
+
+            try:
+                self.update_pose_tab(result)
+            except Exception as e:
+                print(f"Error updating pose tab: {e}")
+
+            try:
+                self.update_stats_tab(result)
+            except Exception as e:
+                print(f"Error updating stats tab: {e}")
+
+            self.analyze_btn.setEnabled(True)
+            self.upload_btn.setEnabled(True)
+            self.progress_bar.setVisible(False)
+            self.statusBar().showMessage("Analysis complete")
+            self.tabs.setCurrentIndex(8)
+
+        except Exception as e:
+            print(f"Critical error in analysis_finished: {e}")
+            self.analysis_error(f"Error processing results: {str(e)}")
 
     def analysis_error(self, error_message):
         QMessageBox.critical(self, "Analysis Error", str(error_message))
@@ -1430,9 +1644,36 @@ class SportsAnalysisApp(QMainWindow):
     def update_stats_tab(self, result):
         """Cập nhật tab thống kê với giao diện widget đẹp hơn"""
 
-        # Xóa layout cũ nếu có
-        if self.tab_stats.layout():
-            QWidget().setLayout(self.tab_stats.layout())
+        # **SỬA ĐỔI:** Kiểm tra result và tạo dữ liệu mặc định nếu cần
+        if not result:
+            print("No result data for stats tab")
+            return
+
+        # Đảm bảo có các key cần thiết
+        if 'detections' not in result:
+            result['detections'] = {}
+        if 'composition_analysis' not in result:
+            result['composition_analysis'] = {}
+        if 'action_analysis' not in result:
+            result['action_analysis'] = {}
+        if 'sports_analysis' not in result:
+            result['sports_analysis'] = {}
+        if 'facial_analysis' not in result:
+            result['facial_analysis'] = {}
+
+        print(f"Updating stats tab with data: {list(result.keys())}")
+        # **KẾT THÚC SỬA ĐỔI**
+
+        # **SỬA ĐỔI:** Xóa layout cũ một cách an toàn hơn
+        try:
+            # Xóa các widget con trước
+            for i in reversed(range(self.tab_stats.layout().count() if self.tab_stats.layout() else 0)):
+                child = self.tab_stats.layout().itemAt(i)
+                if child and child.widget():
+                    child.widget().setParent(None)
+        except Exception as e:
+            print(f"Warning: Error clearing old layout: {e}")
+        # **KẾT THÚC SỬA ĐỔI**
 
         # TẠO SCROLL AREA CHO TOÀN BỘ TAB STATISTICS
         main_layout = QVBoxLayout(self.tab_stats)
@@ -1530,17 +1771,45 @@ class SportsAnalysisApp(QMainWindow):
                 background-color: #bbdefb;
             }
         """)
-        # Lấy caption từ kết quả analysis
-        analysis_caption = ""
-        if hasattr(self, 'analysis_results') and self.analysis_results:
-            analysis_caption = generate_sports_caption(self.analysis_results)
-        copy_button.clicked.connect(lambda: self.copy_to_clipboard(analysis_caption))
+        copy_button.clicked.connect(lambda: self.copy_to_clipboard(result.get('caption', "")))
         caption_header.addWidget(copy_button)
+
+        # **THÊM BLOCK NÀY:** Nút recreate caption cho single mode
+        recreate_button = QPushButton()
+        recreate_button.setIcon(QIcon.fromTheme("view-refresh"))
+        recreate_button.setText("Recreate")
+        recreate_button.setToolTip("Generate new caption")
+        recreate_button.setStyleSheet("""
+            QPushButton {
+                background-color: #fff3e0;
+                border: 1px solid #ffb74d;
+                border-radius: 4px;
+                padding: 4px 10px;
+                color: #f57c00;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #ffe0b2;
+            }
+        """)
+        recreate_button.clicked.connect(self.recreate_single_caption)
+        caption_header.addWidget(recreate_button)
+        # **KẾT THÚC THÊM**
 
         caption_layout.addLayout(caption_header)
 
-        # Caption text trong khung
-        caption_text = result.get('caption', "No caption available")
+        # **SỬA ĐỔI:** Lấy caption từ nhiều nguồn
+        caption_text = result.get('caption', "")
+        if not caption_text:
+            # Nếu không có caption trong result, tạo mới
+            try:
+                from ML_1 import generate_sports_caption
+                caption_text = generate_sports_caption(result)
+                print(f"Generated new caption: {caption_text}")
+            except Exception as e:
+                caption_text = "Error generating caption"
+                print(f"Error generating caption: {e}")
+        # **KẾT THÚC SỬA ĐỔI**
         caption_label = QLabel(caption_text)
         caption_label.setStyleSheet("""
             background-color: #f8f9fa;
@@ -1554,8 +1823,7 @@ class SportsAnalysisApp(QMainWindow):
         caption_label.setWordWrap(True)
 
         caption_layout.addWidget(caption_label)
-        main_layout.addWidget(caption_group)
-        # KẾT THÚC THÊM
+        scroll_layout.addWidget(caption_group)
 
         # 1. Summary GroupBox
         summary_group = QGroupBox("📊 Tổng quan phân tích")
@@ -1622,7 +1890,29 @@ class SportsAnalysisApp(QMainWindow):
         equipment = result.get('action_analysis', {}).get('equipment_types', [])
         if equipment:
             create_info_label("🏈 Equipment:", ', '.join(equipment), 2, 0)
+        # **THÊM FALLBACK:** Nếu không có dữ liệu gì, hiển thị thông báo
+        if (athletes_count == 0 and sport_type == 'Unknown' and
+                framing_quality == 'Unknown' and action_quality == 'Unknown'):
+            # Tạo empty state widget
+            empty_widget = QWidget()
+            empty_layout = QVBoxLayout(empty_widget)
+            empty_layout.setAlignment(Qt.AlignCenter)
 
+            empty_label = QLabel("🔍 Analyzing image...\nStatistics will appear here after analysis.")
+            empty_label.setAlignment(Qt.AlignCenter)
+            empty_label.setStyleSheet("""
+                color: #666;
+                font-size: 16px;
+                padding: 40px;
+                background-color: #f8f9fa;
+                border-radius: 10px;
+                border: 2px dashed #ddd;
+            """)
+
+            empty_layout.addWidget(empty_label)
+            scroll_layout.addWidget(empty_widget)
+            return  # Thoát sớm nếu không có dữ liệu
+        # **KẾT THÚC FALLBACK**
         scroll_layout.addWidget(summary_group)
 
         # 2. Object Table GroupBox
@@ -2084,6 +2374,42 @@ class SportsAnalysisApp(QMainWindow):
 
     def export_batch_results(self):
         self.batch_results.export_results()
+
+    def recreate_all_batch_captions(self):
+        """Tạo lại tất cả caption trong batch"""
+        try:
+            # Import hàm từ ML_1
+            from ML_1 import generate_sports_caption
+
+            # Hiển thị progress
+            self.statusBar().showMessage("Recreating all captions...")
+
+            count = 0
+            total = len(self.batch_results.all_results)
+
+            # Duyệt qua tất cả kết quả
+            for result_data in self.batch_results.all_results:
+                if result_data['result'] is not None:
+                    try:
+                        # Tạo caption mới
+                        new_caption = generate_sports_caption(result_data['result'])
+                        result_data['caption'] = new_caption
+                        count += 1
+                    except Exception as e:
+                        print(f"Error recreating caption for {result_data['path']}: {str(e)}")
+
+            # Cập nhật results hiện tại
+            self.batch_results.results = self.batch_results.all_results.copy()
+
+            # Refresh hiển thị
+            self.batch_results.refresh_display()
+
+            # Hiển thị kết quả
+            self.statusBar().showMessage(f"Recreated {count}/{total} captions successfully!", 5000)
+
+        except Exception as e:
+            self.statusBar().showMessage(f"Error recreating captions: {str(e)}", 5000)
+            print(f"Error in recreate_all_batch_captions: {e}")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
