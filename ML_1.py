@@ -1,6 +1,7 @@
 import random
 import os
 import traceback
+from typing import Dict, List, Optional, Union  # If you're using type hints
 import PIL.Image
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
@@ -5589,7 +5590,7 @@ def generate_sports_caption(analysis_result):
     # Replace the section in your try block with this:
     try:
         pose_results = analysis_result.get('pose_analysis', {})
-        print(f"DEBUG: Main - pose_results: {pose_results}")
+        #print(f"DEBUG: Main - pose_results: {pose_results}")
         
         # Extract keypoints correctly from pose_results structure
         current_keypoints = []
@@ -5728,21 +5729,21 @@ def generate_sports_caption(analysis_result):
                         f"{base_action_desc}, showing controlled movement",
                         f"{base_action_desc}, executing with care"
                     ]
-
+                import random
                 # Replace the previous action description with the enhanced version
                 action_phrases[-1] = random.choice(action_options)
         
         # Ensure string output for pose description
-        if isinstance(pose_description, list):
-            pose_description = " ".join(str(x) for x in pose_description if x)
-        elif not isinstance(pose_description, str):
-            pose_description = str(pose_description)
+        if isinstance(get_pose_description, list):
+            pose_description = " ".join(str(x) for x in get_pose_description if x)
+        elif not isinstance(get_pose_description, str):
+            pose_description = str(get_pose_description)
                 
     except Exception as e:
         print(f"Error analyzing pose: {str(e)}")
         print(f"DEBUG: Exception details - {type(e).__name__}")
         pose_description = "maintaining athletic stance"
-        
+
     athlete_count = detections.get('athletes', 0)
     action_level = action_analysis.get('action_level', 0)
     equipment = action_analysis.get('equipment_types', [])
