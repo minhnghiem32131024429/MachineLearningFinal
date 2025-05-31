@@ -332,6 +332,28 @@ class BatchResultWidget(QWidget):
         self.refresh_display()
         # **KẾT THÚC THAY THẾ**
 
+    def recreate_caption(self, result_data):
+        """Tạo lại caption cho một kết quả cụ thể"""
+        try:
+            if result_data['result']:
+                # Tạo caption mới
+                new_caption = generate_sports_caption(result_data['result'])
+
+                # Cập nhật caption
+                result_data['caption'] = new_caption
+
+                # Refresh lại display
+                self.refresh_display()
+
+                # Hiển thị thông báo nhỏ trong console
+                print(f"Caption recreated for: {os.path.basename(result_data['path'])}")
+
+            else:
+                print("Cannot recreate caption: No analysis result available")
+
+        except Exception as e:
+            print(f"Error recreating caption: {e}")
+
     # **THÊM HÀM MỚI:** Tạo result card với nút copy
     def create_result_card(self, result_data):
         """Tạo card cho một kết quả"""
@@ -396,6 +418,23 @@ class BatchResultWidget(QWidget):
         """)
         copy_caption_btn.clicked.connect(lambda: self.copy_to_clipboard(caption, "Caption"))
         header_layout.addWidget(copy_caption_btn)
+        # Nút recreate caption
+        recreate_caption_btn = QPushButton("🔄 Recreate")
+        recreate_caption_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                padding: 5px 10px;
+                border-radius: 3px;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        recreate_caption_btn.clicked.connect(lambda: self.recreate_caption(result_data))
+        header_layout.addWidget(recreate_caption_btn)
 
         # Nút copy file path
         copy_path_btn = QPushButton("📁 Copy Path")
@@ -1024,6 +1063,25 @@ class SportsAnalysisApp(QMainWindow):
         batch_header_layout.addWidget(batch_title)
         batch_header_layout.addStretch()
 
+        # Nút recreate all captions
+        self.recreate_all_btn = QPushButton("🔄 Recreate All Captions")
+        self.recreate_all_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 8px 16px;
+                border-radius: 5px;
+                margin-right: 8px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        self.recreate_all_btn.clicked.connect(self.recreate_all_batch_captions)
+        batch_header_layout.addWidget(self.recreate_all_btn)
+
         self.export_btn = QPushButton("Export Results")
         self.export_btn.setStyleSheet("""
             QPushButton {
@@ -1062,6 +1120,76 @@ class SportsAnalysisApp(QMainWindow):
 
         # Status bar
         self.statusBar().showMessage("Ready")
+
+    def recreate_single_caption(self):
+        """Tạo lại caption cho ảnh hiện tại"""
+        print("Đang cố gắng tạo lại caption trong chế độ single...")
+
+        if not hasattr(self, 'analysis_results') or not self.analysis_results:
+            self.statusBar().showMessage("Không có kết quả phân tích", 3000)
+            return
+
+        try:
+            # Tạo caption mới
+            from ML_1 import generate_sports_caption
+            new_caption = generate_sports_caption(self.analysis_results)
+            print(f"DEBUG: Caption mới: {new_caption}")
+
+            # Cập nhật trong kết quả phân tích
+            if isinstance(self.analysis_results, dict):
+                self.analysis_results['caption'] = new_caption
+                print("DEBUG: Đã cập nhật caption trong kết quả phân tích")
+
+            # Cập nhật lại tab Statistics để hiển thị caption mới
+            self.update_stats_tab(self.analysis_results)
+
+            # Hiển thị thông báo thành công
+            self.statusBar().showMessage("Đã tạo lại caption thành công", 3000)
+
+        except Exception as e:
+            print(f"DEBUG: Lỗi khi tạo lại caption: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            self.statusBar().showMessage(f"Lỗi khi tạo lại caption: {e}", 3000)
+
+    def recreate_all_batch_captions(self):
+        """Tạo lại caption cho tất cả ảnh trong batch"""
+        if not self.batch_results.all_results:
+            self.statusBar().showMessage("Không có kết quả batch nào để xử lý", 3000)
+            return
+
+        # Cập nhật status
+        self.statusBar().showMessage("Đang tạo lại caption cho tất cả ảnh...")
+
+        # Vô hiệu hóa nút để tránh nhấn nhiều lần
+        self.recreate_all_btn.setEnabled(False)
+
+        try:
+            # Tính tổng số ảnh cần xử lý
+            total = len(self.batch_results.all_results)
+            processed = 0
+
+            # Xử lý từng ảnh
+            for result_data in self.batch_results.all_results:
+                if result_data['result']:
+                    # Tạo caption mới
+                    new_caption = generate_sports_caption(result_data['result'])
+                    # Cập nhật caption
+                    result_data['caption'] = new_caption
+
+                processed += 1
+                if processed % 5 == 0 or processed == total:
+                    self.statusBar().showMessage(f"Đã tạo lại {processed}/{total} caption...")
+
+            # Cập nhật lại hiển thị
+            self.batch_results.refresh_display()
+            self.statusBar().showMessage(f"Đã tạo lại thành công {total} caption", 3000)
+
+        except Exception as e:
+            self.statusBar().showMessage(f"Lỗi khi tạo lại caption: {e}", 3000)
+
+        # Kích hoạt lại nút
+        self.recreate_all_btn.setEnabled(True)
 
     def create_card_widget(self):
         """Tạo widget card với shadow effect"""
@@ -1536,7 +1664,26 @@ class SportsAnalysisApp(QMainWindow):
             analysis_caption = generate_sports_caption(self.analysis_results)
         copy_button.clicked.connect(lambda: self.copy_to_clipboard(analysis_caption))
         caption_header.addWidget(copy_button)
-
+        # Nút recreate caption
+        recreate_button = QPushButton()
+        recreate_button.setIcon(QIcon.fromTheme("view-refresh"))
+        recreate_button.setText("Recreate")
+        recreate_button.setToolTip("Generate a new caption")
+        recreate_button.setStyleSheet("""
+            QPushButton {
+                background-color: #e8f5e9;
+                border: 1px solid #a5d6a7;
+                border-radius: 4px;
+                padding: 4px 10px;
+                color: #388e3c;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #c8e6c9;
+            }
+        """)
+        recreate_button.clicked.connect(lambda: self.recreate_single_caption())
+        caption_header.addWidget(recreate_button)
         caption_layout.addLayout(caption_header)
 
         # Caption text trong khung
