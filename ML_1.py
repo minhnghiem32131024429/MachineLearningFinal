@@ -3703,60 +3703,25 @@ def generate_sports_caption(analysis_result):
     action_quality = action_analysis.get('action_quality', '')
     equipment = action_analysis.get('equipment_types', [])
 
-    # Sport-specific terminology - PHIÊN BẢN EXPANDED
+    # Sport-specific terminology
     sport_specific_terms = {
-        'soccer': ['match', 'pitch', 'soccer', 'football', 'kick', 'goal', 'striker', 'midfielder', 'defender'],
-        'football': ['stadium', 'team', 'touchdown', 'offense', 'quarterback', 'end zone', 'field goal', 'snap'],
-        'basketball': ['court', 'shot', 'hoop', 'dunk', 'basket', 'three-pointer', 'free throw', 'rebound'],
-        'tennis': ['court', 'player', 'serve', 'set', 'stroke', 'match point', 'racket', 'backhand', 'forehand'],
-        'baseball': ['field', 'hit', 'home run', 'pitcher', 'batter', 'diamond', 'base', 'strike', 'ball'],
-        'swimming': ['pool', 'lane', 'swimmer', 'stroke', 'race', 'freestyle', 'butterfly', 'backstroke', 'breaststroke'],
-        'volleyball': ['net', 'court', 'spike', 'serve', 'attack', 'block', 'dig', 'set'],
-        'track': ['track', 'race', 'sprinter', 'athlete', 'hurdle', 'relay', 'starting block'],
-        'running': ['race', 'track', 'runner', 'sprint', 'marathon', 'finish line', 'pace'],
-        'boxing': ['ring', 'boxer', 'punch', 'match', 'bout', 'glove', 'round', 'jab', 'hook'],
-        'skiing': ['snow', 'slope', 'skier', 'mountain', 'downhill', 'slalom', 'mogul', 'lift'],
-        'skating': ['ice', 'skater', 'performance', 'rink', 'blade', 'figure skating', 'speed skating'],
-        'surfing': ['wave', 'beach', 'surfer', 'ocean', 'board', 'curl', 'barrel', 'tide'],
-        'skateboarding': ['skate park', 'skateboarder', 'trick', 'jump', 'ramp', 'rail', 'ollie', 'kickflip'],
-        'golf': ['course', 'club', 'swing', 'golfer', 'hole', 'tee', 'fairway', 'green', 'putt'],
-        'rugby': ['field', 'tackle', 'player', 'scrum', 'try', 'lineout', 'ruck', 'maul'],
-        'martial arts': ['mat', 'fighter', 'technique', 'match', 'belt', 'kata', 'sparring', 'dojo'],
-        # THÊM CÁC MÔN MỚI
-        'cycling': ['bike', 'cyclist', 'race', 'track', 'road', 'pedal', 'gear', 'wheel'],
-        'badminton': ['court', 'racket', 'shuttlecock', 'net', 'smash', 'drop shot', 'serve'],
-        'table tennis': ['table', 'paddle', 'ball', 'net', 'serve', 'rally', 'spin'],
-        'ping pong': ['table', 'paddle', 'ball', 'net', 'serve', 'rally', 'spin'],
-        'gymnastics': ['mat', 'beam', 'bar', 'vault', 'floor', 'routine', 'tumble', 'apparatus'],
-        'weightlifting': ['barbell', 'weight', 'lift', 'gym', 'bench', 'squat', 'deadlift'],
-        'wrestling': ['mat', 'wrestler', 'takedown', 'pin', 'grapple', 'hold'],
-        'archery': ['bow', 'arrow', 'target', 'bullseye', 'archer', 'quiver'],
-        'fencing': ['sword', 'mask', 'piste', 'fencer', 'thrust', 'parry', 'foil', 'épée'],
-        'hockey': ['rink', 'stick', 'puck', 'goal', 'ice', 'skate', 'check', 'shot'],
-        'lacrosse': ['stick', 'ball', 'goal', 'field', 'net', 'cradle', 'pass'],
-        'cricket': ['bat', 'ball', 'wicket', 'pitch', 'bowl', 'run', 'boundary'],
-        'american football': ['stadium', 'team', 'touchdown', 'offense', 'quarterback', 'field goal'],
-        'climbing': ['wall', 'rope', 'hold', 'climber', 'route', 'grip', 'harness'],
-        'motocross': ['bike', 'track', 'jump', 'dirt', 'rider', 'gear', 'helmet'],
-        'snowboarding': ['snow', 'slope', 'board', 'mountain', 'halfpipe', 'trick'],
-        'equestrian': ['horse', 'rider', 'jump', 'dressage', 'saddle', 'rein'],
-        'rowing': ['boat', 'oar', 'water', 'crew', 'stroke', 'river', 'regatta'],
-        'sailing': ['boat', 'sail', 'wind', 'water', 'mast', 'yacht', 'regatta'],
-        'diving': ['pool', 'board', 'water', 'dive', 'platform', 'splash'],
-        'water polo': ['pool', 'ball', 'goal', 'water', 'treading', 'throw'],
-        'triathlon': ['swim', 'bike', 'run', 'race', 'transition', 'endurance'],
-        'pentathlon': ['fence', 'shoot', 'swim', 'ride', 'run', 'event'],
-        'bowling': ['lane', 'ball', 'pin', 'strike', 'spare', 'frame'],
-        'billiards': ['table', 'cue', 'ball', 'pocket', 'chalk', 'break'],
-        'darts': ['board', 'dart', 'bullseye', 'throw', 'target'],
-        'fishing': ['rod', 'reel', 'fish', 'water', 'bait', 'catch'],
-        'ultimate frisbee': ['disc', 'field', 'throw', 'catch', 'end zone'],
-        'frisbee': ['disc', 'field', 'throw', 'catch', 'end zone'],
-        'kite surfing': ['kite', 'board', 'wind', 'water', 'harness'],
-        'para surfing': ['board', 'wave', 'water', 'adapted', 'balance'],
-        'beach volleyball': ['sand', 'net', 'beach', 'spike', 'dig'],
-        'water skiing': ['ski', 'boat', 'water', 'rope', 'wake'],
-        'jet skiing': ['jet ski', 'water', 'wave', 'speed', 'rider']
+        'soccer': ['match', 'pitch', 'soccer', 'football', 'kick', 'goal'],
+        'football': ['stadium', 'team', 'touchdown', 'offense', 'quarterback'],
+        'basketball': ['court', 'shot', 'hoop', 'dunk', 'basket'],
+        'tennis': ['court', 'player', 'serve', 'set', 'stroke', 'match point'],
+        'baseball': ['field', 'hit', 'home run', 'pitcher', 'batter'],
+        'swimming': ['pool', 'lane', 'swimmer', 'stroke', 'race'],
+        'volleyball': ['net', 'court', 'spike', 'serve'],
+        'track': ['track', 'race', 'sprinter', 'athlete'],
+        'running': ['race', 'track', 'runner', 'sprint'],
+        'boxing': ['ring', 'boxer', 'punch', 'match', 'bout'],
+        'skiing': ['snow', 'slope', 'skier', 'mountain'],
+        'skating': ['ice', 'skater', 'performance', 'rink'],
+        'surfing': ['wave', 'beach', 'surfer', 'ocean'],
+        'skateboarding': ['skate park', 'skateboarder', 'trick', 'jump'],
+        'golf': ['course', 'club', 'swing', 'golfer', 'hole'],
+        'rugby': ['field', 'tackle', 'player', 'scrum'],
+        'martial arts': ['mat', 'fighter', 'technique', 'match']
     }
 
     # Determine sport type based on name and equipment
@@ -3953,7 +3918,7 @@ def generate_sports_caption(analysis_result):
                     "executing an advanced technical maneuver",
                     "during a powerful offensive drive"
                 ]
-            elif detected_sport in ['tennis', 'baseball', 'golf', 'badminton', 'table tennis', 'ping pong', 'cricket']:
+            elif detected_sport in ['tennis', 'baseball', 'golf']:
                 action_options = [
                     "during a perfectly executed swing",
                     "demonstrating exceptional technique",
@@ -3961,7 +3926,7 @@ def generate_sports_caption(analysis_result):
                     "showcasing masterful control",
                     "with professional athletic form"
                 ]
-            elif detected_sport in ['running', 'track', 'swimming', 'cycling', 'triathlon']:
+            elif detected_sport in ['running', 'track', 'swimming']:
                 action_options = [
                     "at the moment of breakthrough acceleration",
                     "displaying extraordinary effort",
@@ -4013,24 +3978,6 @@ def generate_sports_caption(analysis_result):
                     eq_list.append("a sports ball")
             elif eq.lower() == "tennis racket":
                 eq_list.append("a tennis racket")
-            elif eq.lower() == "badminton racket":
-                eq_list.append("a badminton racket")
-            elif eq.lower() == "table tennis paddle" or eq.lower() == "ping pong paddle":
-                eq_list.append("a table tennis paddle")
-            elif eq.lower() == "hockey stick":
-                eq_list.append("a hockey stick")
-            elif eq.lower() == "lacrosse stick":
-                eq_list.append("a lacrosse stick")
-            elif eq.lower() == "cricket bat":
-                eq_list.append("a cricket bat")
-            elif eq.lower() == "golf club":
-                eq_list.append("a golf club")
-            elif eq.lower() == "bowling ball":
-                eq_list.append("a bowling ball")
-            elif eq.lower() == "american football":
-                eq_list.append("an American football")
-            elif eq.lower() == "rugby ball":
-                eq_list.append("a rugby ball")
             else:
                 eq_list.append(eq)
 
