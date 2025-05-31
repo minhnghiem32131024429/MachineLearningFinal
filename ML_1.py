@@ -74,15 +74,41 @@ def classify_sports_ball_with_clip(image, box, device=None):
         print(f"Lỗi khi xử lý ảnh bóng: {str(e)}")
         return "sports ball"
 
-    # Danh sách các mô tả về loại bóng (kết hợp nhiều biến thể để tăng độ chính xác)
+    # MỞ RỘNG DANH SÁCH CÁC LOẠI BÓNG CLIP CÓ THỂ PHÂN LOẠI
     ball_descriptions = [
+        # Bóng đá
         "a soccer ball", "a white and black soccer ball", "a football used in soccer games",
+        "a FIFA soccer ball", "a round soccer ball with pentagonal patterns",
+
+        # Bóng rổ
         "a basketball", "an orange basketball with black lines", "a ball used in basketball",
+        "a Spalding basketball", "an NBA basketball",
+
+        # Bóng tennis
         "a tennis ball", "a yellow-green tennis ball", "a small fuzzy ball used in tennis",
+        "a Wilson tennis ball", "a bright yellow tennis ball",
+
+        # Bóng chuyền
         "a volleyball", "a white volleyball with panels", "a ball used in volleyball games",
+        "a Mikasa volleyball", "a white and blue volleyball",
+
+        # Bóng chày
         "a baseball", "a white baseball with red stitching", "a small hard ball used in baseball",
+        "a Major League baseball", "a leather baseball",
+
+        # Bóng golf
         "a golf ball", "a small white golf ball with dimples", "a ball used in golf",
-        "a rugby ball", "an oval-shaped rugby ball", "a ball used in rugby"
+        "a Titleist golf ball", "a dimpled white golf ball",
+
+        # Bóng rugby
+        "a rugby ball", "an oval-shaped rugby ball", "a ball used in rugby",
+        "an American football", "an NFL football",
+
+        # Các loại bóng khác
+        "a ping pong ball", "a small white table tennis ball", "a ball used in table tennis",
+        "a bowling ball", "a heavy ball used for bowling", "a black bowling ball",
+        "a medicine ball", "a heavy exercise ball", "a weighted fitness ball",
+        "a beach ball", "a large inflatable ball", "a colorful beach ball"
     ]
 
     # Mã hóa các mô tả văn bản
@@ -106,21 +132,29 @@ def classify_sports_ball_with_clip(image, box, device=None):
     best_match_idx = indices[0].item()
     best_match = ball_descriptions[best_match_idx]
 
-    # Map về tên chuẩn của loại bóng dựa trên mô tả tốt nhất
-    if "soccer" in best_match or "football" in best_match:
+    # MỞ RỘNG MAPPING CÁC LOẠI BÓNG
+    if "soccer" in best_match:
         return "soccer ball"
-    elif "basketball" in best_match:
+    elif "basketball" in best_match or "NBA" in best_match:
         return "basketball"
     elif "tennis" in best_match:
         return "tennis ball"
     elif "volleyball" in best_match:
         return "volleyball"
-    elif "baseball" in best_match:
+    elif "baseball" in best_match and "Major League" not in best_match:
         return "baseball"
     elif "golf" in best_match:
         return "golf ball"
-    elif "rugby" in best_match:
-        return "rugby ball"
+    elif "rugby" in best_match or "American football" in best_match or "NFL" in best_match:
+        return "american football"
+    elif "ping pong" in best_match or "table tennis" in best_match:
+        return "ping pong ball"
+    elif "bowling" in best_match:
+        return "bowling ball"
+    elif "medicine" in best_match or "fitness" in best_match:
+        return "medicine ball"
+    elif "beach" in best_match:
+        return "beach ball"
 
     # Nếu không chắc chắn, giữ nguyên nhãn gốc
     return "sports ball"
@@ -428,10 +462,29 @@ def detect_sports_objects(yolo, img_data):
     """Detect sports-related objects using YOLO"""
     results = yolo(img_data['resized_array'], conf=0.25)
 
-    # Extract detections
-    sports_classes = ['person', 'sports ball', 'tennis racket', 'baseball bat', 'baseball glove',
-                      'skateboard', 'surfboard', 'tennis ball', 'bottle', 'wine glass', 'cup',
-                      'frisbee', 'skis', 'snowboard', 'kite']
+    # Extract detections - CHỈ CÁC LỚP YOLO THỰC SỰ CÓ
+    sports_classes = [
+        'person',           # Người
+        'sports ball',      # Bóng thể thao (sẽ dùng CLIP phân loại chi tiết)
+        'tennis racket',    # Vợt tennis
+        'baseball bat',     # Gậy baseball
+        'baseball glove',   # Găng tay baseball
+        'frisbee',         # Đĩa bay
+        'skis',            # Ván trượt tuyết
+        'snowboard',       # Ván trượt tuyết đơn
+        'surfboard',       # Ván lướt sóng
+        'bicycle',         # Xe đạp
+        'motorcycle',      # Xe máy
+        'kite',            # Diều
+        'skateboard',      # Ván trượt
+        'bottle',          # Chai nước (phụ kiện thể thao)
+        'backpack',        # Ba lô thể thao
+        'handbag',         # Túi thể thao
+        'umbrella',        # Ô (cho golf)
+        'tie',             # Cà vạt (trang phục thể thao chính thức)
+        'suitcase',        # Vali đựng đồ thể thao
+        'cup'              # Cốc/ly (giải thưởng hoặc nước uống)
+    ]
 
     result = results[0]  # First image result
 
@@ -1304,24 +1357,34 @@ def analyze_sports_composition(detections, analysis, img_data):
         'action_focus': 'Unknown'
     }
 
-    # Try to determine sport type
+    # MAPPING CHỈ CÁC ĐỐI TƯỢNG YOLO THỰC + CLIP BALL CLASSIFICATION
     sport_equipment = {
+        # Đối tượng YOLO cơ bản
         'tennis racket': 'Tennis',
-        'tennis ball': 'Tennis',
-        'sports ball': 'Ball Sport',
-        'soccer ball': 'Soccer',  # Thêm
-        'basketball': 'Basketball',  # Thêm
-        'volleyball': 'Volleyball',  # Thêm
-        'baseball': 'Baseball',  # Thêm
         'baseball bat': 'Baseball',
         'baseball glove': 'Baseball',
-        'golf ball': 'Golf',  # Thêm
-        'rugby ball': 'Rugby',  # Thêm
         'skateboard': 'Skateboarding',
         'surfboard': 'Surfing',
-        'frisbee': 'Frisbee',
-        'skis': 'Skiing',
-        'snowboard': 'Snowboarding'
+        'frisbee': 'Ultimate Frisbee',
+        'skis': 'Alpine Skiing',
+        'snowboard': 'Snowboarding',
+        'bicycle': 'Cycling',
+        'motorcycle': 'Motocross',
+        'kite': 'Kite Sports',
+
+        # Các loại bóng được CLIP phân loại từ 'sports ball'
+        'soccer ball': 'Soccer',
+        'basketball': 'Basketball',
+        'volleyball': 'Volleyball',
+        'tennis ball': 'Tennis',
+        'baseball': 'Baseball',
+        'golf ball': 'Golf',
+        'american football': 'American Football',
+        'rugby ball': 'Rugby',
+        'ping pong ball': 'Table Tennis',
+        'bowling ball': 'Bowling',
+        'medicine ball': 'Fitness Training',
+        'beach ball': 'Beach Sports'
     }
 
     # Cập nhật kết quả dựa trên môi trường
