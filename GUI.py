@@ -7,7 +7,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QPushButton, QLabel, QFileDialog, QTabWidget, QSplitter,
                              QGraphicsDropShadowEffect, QProgressBar, QComboBox, QMessageBox,
                              QSizePolicy, QFrame, QScrollArea, QGroupBox, QGridLayout,
-                             QTableWidget, QTableWidgetItem)
+                             QTableWidget, QTableWidgetItem, QLineEdit)
 from PyQt5.QtGui import QPixmap, QColor, QBrush, QIcon
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtWidgets import QListWidget, QListWidgetItem, QGridLayout, QButtonGroup, QRadioButton
@@ -231,8 +231,12 @@ class ImageDisplayWidget(QWidget):
 class BatchResultWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.init_ui()
         self.results = []
+        # **THÊM DÒNG NÀY:** Thêm các thuộc tính cho filtering và sorting
+        self.all_results = []  # Lưu tất cả kết quả gốc
+        self.current_sort = "name_asc"  # Mặc định sort theo tên A-Z
+        # **KẾT THÚC THÊM**
+        self.init_ui()
 
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -241,6 +245,64 @@ class BatchResultWidget(QWidget):
         header = QLabel("Batch Processing Results")
         header.setStyleSheet("font-size: 18px; font-weight: bold; margin-bottom: 10px;")
         layout.addWidget(header)
+
+        # **THÊM BLOCK NÀY:** Controls bar với search và sort
+        controls_layout = QHBoxLayout()
+
+        # Search box
+        search_label = QLabel("Search:")
+        search_label.setStyleSheet("font-weight: bold; margin-right: 5px;")
+        controls_layout.addWidget(search_label)
+
+        self.search_box = QLineEdit()
+        self.search_box.setPlaceholderText("Enter image name to search...")
+        self.search_box.setStyleSheet("""
+            QLineEdit {
+                padding: 8px;
+                border: 2px solid #ddd;
+                border-radius: 5px;
+                font-size: 14px;
+            }
+            QLineEdit:focus {
+                border-color: #2196F3;
+            }
+        """)
+        self.search_box.textChanged.connect(self.filter_results)
+        controls_layout.addWidget(self.search_box)
+
+        # Sort dropdown
+        sort_label = QLabel("Sort by:")
+        sort_label.setStyleSheet("font-weight: bold; margin-left: 15px; margin-right: 5px;")
+        controls_layout.addWidget(sort_label)
+
+        self.sort_combo = QComboBox()
+        self.sort_combo.addItems([
+            "Name (A-Z)", "Name (Z-A)",
+            "Framing Score (High-Low)", "Framing Score (Low-High)",
+            "Action Score (High-Low)", "Action Score (Low-High)",
+            "Emotion Intensity (High-Low)", "Emotion Intensity (Low-High)"
+        ])
+        self.sort_combo.setStyleSheet("""
+            QComboBox {
+                padding: 8px;
+                border: 2px solid #ddd;
+                border-radius: 5px;
+                font-size: 14px;
+                min-width: 150px;
+            }
+        """)
+        self.sort_combo.currentTextChanged.connect(self.sort_results)
+        controls_layout.addWidget(self.sort_combo)
+
+        controls_layout.addStretch()
+
+        # Results count
+        self.count_label = QLabel("0 results")
+        self.count_label.setStyleSheet("color: #666; font-style: italic;")
+        controls_layout.addWidget(self.count_label)
+
+        layout.addLayout(controls_layout)
+        # **KẾT THÚC THÊM**
 
         # Scroll area chứa kết quả
         self.scroll_area = QScrollArea()
@@ -255,7 +317,29 @@ class BatchResultWidget(QWidget):
         layout.addWidget(self.scroll_area)
 
     def add_result(self, image_path, caption, result=None, scores=None):
-        # Tạo card cho mỗi kết quả
+        # **THAY THẾ TOÀN BỘ HÀM NÀY:**
+        # Lưu vào danh sách gốc
+        result_data = {
+            'path': image_path,
+            'caption': caption,
+            'result': result,
+            'scores': scores or {}
+        }
+        self.all_results.append(result_data)
+        self.results = self.all_results.copy()
+
+        # Refresh display
+        self.refresh_display()
+        # **KẾT THÚC THAY THẾ**
+
+    # **THÊM HÀM MỚI:** Tạo result card với nút copy
+    def create_result_card(self, result_data):
+        """Tạo card cho một kết quả"""
+        image_path = result_data['path']
+        caption = result_data['caption']
+        scores = result_data['scores']
+
+        # Tạo card cho kết quả
         result_card = QWidget()
         result_card.setStyleSheet("""
             QWidget {
@@ -285,10 +369,53 @@ class BatchResultWidget(QWidget):
         # Thông tin
         info_layout = QVBoxLayout()
 
-        # Tên file
+        # Header với tên file và nút copy
+        header_layout = QHBoxLayout()
+
         filename = os.path.basename(image_path)
         filename_label = QLabel(f"<b>{filename}</b>")
         filename_label.setStyleSheet("font-size: 14px; margin-bottom: 5px;")
+        header_layout.addWidget(filename_label)
+
+        header_layout.addStretch()
+
+        # Nút copy caption
+        copy_caption_btn = QPushButton("📋 Copy Caption")
+        copy_caption_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2196F3;
+                color: white;
+                border: none;
+                padding: 5px 10px;
+                border-radius: 3px;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #1976D2;
+            }
+        """)
+        copy_caption_btn.clicked.connect(lambda: self.copy_to_clipboard(caption, "Caption"))
+        header_layout.addWidget(copy_caption_btn)
+
+        # Nút copy file path
+        copy_path_btn = QPushButton("📁 Copy Path")
+        copy_path_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                padding: 5px 10px;
+                border-radius: 3px;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        copy_path_btn.clicked.connect(lambda: self.copy_to_clipboard(image_path, "File path"))
+        header_layout.addWidget(copy_path_btn)
+
+        info_layout.addLayout(header_layout)
 
         # Caption
         caption_label = QLabel(caption)
@@ -301,7 +428,6 @@ class BatchResultWidget(QWidget):
             border-left: 3px solid #2196F3;
         """)
 
-        info_layout.addWidget(filename_label)
         info_layout.addWidget(caption_label)
 
         # Thêm scores nếu có
@@ -355,6 +481,30 @@ class BatchResultWidget(QWidget):
                     scores_layout.addWidget(intensity_label, row, 1)
                 row += 1
 
+            # Nút copy scores
+            copy_scores_layout = QHBoxLayout()
+            copy_scores_layout.addStretch()
+
+            copy_scores_btn = QPushButton("📊 Copy Scores")
+            copy_scores_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #FF9800;
+                    color: white;
+                    border: none;
+                    padding: 5px 10px;
+                    border-radius: 3px;
+                    font-size: 12px;
+                }
+                QPushButton:hover {
+                    background-color: #F57C00;
+                }
+            """)
+            scores_text = self.format_scores_for_copy(scores)
+            copy_scores_btn.clicked.connect(lambda: self.copy_to_clipboard(scores_text, "Scores"))
+            copy_scores_layout.addWidget(copy_scores_btn)
+
+            scores_layout.addLayout(copy_scores_layout, row, 0, 1, 2)
+
             info_layout.addWidget(scores_widget)
 
         info_layout.addStretch()
@@ -362,16 +512,104 @@ class BatchResultWidget(QWidget):
         card_layout.addWidget(image_label)
         card_layout.addLayout(info_layout, 1)
 
-        self.scroll_layout.addWidget(result_card)
+        return result_card
 
-        # Lưu kết quả
-        self.results.append({
-            'path': image_path,
-            'caption': caption,
-            'result': result
-        })
+    # **THÊM HÀM MỚI:** Copy to clipboard
+    def copy_to_clipboard(self, text, data_type):
+        """Copy text to clipboard và hiển thị thông báo"""
+        try:
+            app = QApplication.instance()
+            clipboard = app.clipboard()
+            clipboard.setText(text)
+
+            # Hiển thị thông báo nhỏ trong console
+            print(f"{data_type} copied to clipboard: {text[:50]}...")
+
+        except Exception as e:
+            print(f"Error copying to clipboard: {e}")
+
+    # **THÊM HÀM MỚI:** Format scores để copy
+    def format_scores_for_copy(self, scores):
+        """Format scores thành text để copy"""
+        lines = []
+        lines.append("=== ANALYSIS SCORES ===")
+
+        if 'framing_quality' in scores:
+            lines.append(f"Framing Quality: {scores['framing_quality']}")
+            if 'framing_score' in scores:
+                lines.append(f"Framing Score: {scores['framing_score']:.3f}")
+
+        if 'action_quality' in scores:
+            lines.append(f"Action Quality: {scores['action_quality']}")
+            if 'action_level' in scores:
+                lines.append(f"Action Level: {scores['action_level']:.2f}")
+
+        if 'emotion' in scores:
+            lines.append(f"Emotion: {scores['emotion']}")
+            if 'emotion_intensity' in scores and scores['emotion'] != 'No face detected':
+                lines.append(f"Emotion Intensity: {scores['emotion_intensity']:.2f}")
+
+        return "\n".join(lines)
+
+    # **THÊM HÀM MỚI:** Lọc kết quả
+    def filter_results(self):
+        """Lọc kết quả theo tên file"""
+        search_text = self.search_box.text().lower().strip()
+
+        if not search_text:
+            self.results = self.all_results.copy()
+        else:
+            self.results = [
+                result for result in self.all_results
+                if search_text in os.path.basename(result['path']).lower()
+            ]
+
+        self.refresh_display()
+
+    # **THÊM HÀM MỚI:** Sắp xếp kết quả
+    def sort_results(self):
+        """Sắp xếp kết quả theo lựa chọn"""
+        sort_type = self.sort_combo.currentText()
+
+        if sort_type == "Name (A-Z)":
+            self.results.sort(key=lambda x: os.path.basename(x['path']).lower())
+        elif sort_type == "Name (Z-A)":
+            self.results.sort(key=lambda x: os.path.basename(x['path']).lower(), reverse=True)
+        elif sort_type == "Framing Score (High-Low)":
+            self.results.sort(key=lambda x: x['scores'].get('framing_score', 0), reverse=True)
+        elif sort_type == "Framing Score (Low-High)":
+            self.results.sort(key=lambda x: x['scores'].get('framing_score', 0))
+        elif sort_type == "Action Score (High-Low)":
+            self.results.sort(key=lambda x: x['scores'].get('action_level', 0), reverse=True)
+        elif sort_type == "Action Score (Low-High)":
+            self.results.sort(key=lambda x: x['scores'].get('action_level', 0))
+        elif sort_type == "Emotion Intensity (High-Low)":
+            self.results.sort(key=lambda x: x['scores'].get('emotion_intensity', 0), reverse=True)
+        elif sort_type == "Emotion Intensity (Low-High)":
+            self.results.sort(key=lambda x: x['scores'].get('emotion_intensity', 0))
+
+        self.refresh_display()
+
+    # **THÊM HÀM MỚI:** Refresh hiển thị
+    def refresh_display(self):
+        """Refresh hiển thị với kết quả đã lọc/sắp xếp"""
+        # Xóa tất cả widget con
+        for i in reversed(range(self.scroll_layout.count())):
+            child = self.scroll_layout.itemAt(i).widget()
+            if child:
+                child.setParent(None)
+
+        # Thêm kết quả mới
+        for result_data in self.results:
+            result_card = self.create_result_card(result_data)
+            self.scroll_layout.addWidget(result_card)
+
+        # Cập nhật số lượng
+        self.count_label.setText(f"{len(self.results)} results")
 
     def clear_results(self):
+        # **THAY THẾ TOÀN BỘ HÀM NÀY:**
+        """Xóa tất cả kết quả"""
         # Xóa tất cả widget con
         for i in reversed(range(self.scroll_layout.count())):
             child = self.scroll_layout.itemAt(i).widget()
@@ -379,8 +617,15 @@ class BatchResultWidget(QWidget):
                 child.setParent(None)
 
         self.results.clear()
+        self.all_results.clear()
+        if hasattr(self, 'count_label'):
+            self.count_label.setText("0 results")
+        if hasattr(self, 'search_box'):
+            self.search_box.clear()
+        # **KẾT THÚC THAY THẾ**
 
     def export_results(self):
+        # **THAY THẾ TOÀN BỘ HÀM NÀY:**
         if not self.results:
             return
 
@@ -392,16 +637,30 @@ class BatchResultWidget(QWidget):
             try:
                 with open(file_path, 'w', encoding='utf-8') as f:
                     f.write("Batch Processing Results\n")
+                    f.write("=" * 50 + "\n")
+                    f.write(f"Total results: {len(self.results)}\n")
+                    f.write(f"Sort order: {self.sort_combo.currentText()}\n")
+                    search_text = self.search_box.text().strip()
+                    if search_text:
+                        f.write(f"Search filter: '{search_text}'\n")
                     f.write("=" * 50 + "\n\n")
 
                     for i, result in enumerate(self.results, 1):
                         f.write(f"{i}. File: {os.path.basename(result['path'])}\n")
-                        f.write(f"   Caption: {result['caption']}\n\n")
+                        f.write(f"   Full path: {result['path']}\n")
+                        f.write(f"   Caption: {result['caption']}\n")
+
+                        if result['scores']:
+                            f.write(f"   Scores:\n")
+                            for key, value in result['scores'].items():
+                                f.write(f"     - {key}: {value}\n")
+                        f.write("\n")
 
                 QMessageBox.information(self, "Export Complete", f"Results exported to {file_path}")
 
             except Exception as e:
                 QMessageBox.critical(self, "Export Error", f"Could not export results: {str(e)}")
+        # **KẾT THÚC THAY THẾ**
 
 
 class SportsAnalysisApp(QMainWindow):
@@ -1271,7 +1530,11 @@ class SportsAnalysisApp(QMainWindow):
                 background-color: #bbdefb;
             }
         """)
-        copy_button.clicked.connect(lambda: self.copy_to_clipboard(result.get('caption', "")))
+        # Lấy caption từ kết quả analysis
+        analysis_caption = ""
+        if hasattr(self, 'analysis_results') and self.analysis_results:
+            analysis_caption = generate_sports_caption(self.analysis_results)
+        copy_button.clicked.connect(lambda: self.copy_to_clipboard(analysis_caption))
         caption_header.addWidget(copy_button)
 
         caption_layout.addLayout(caption_header)
