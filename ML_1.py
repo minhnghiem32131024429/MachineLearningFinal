@@ -107,7 +107,6 @@ def classify_sports_ball_with_clip(image, box, device=None):
         # Các loại bóng khác
         "a ping pong ball", "a small white table tennis ball", "a ball used in table tennis",
         "a bowling ball", "a heavy ball used for bowling", "a black bowling ball",
-        "a medicine ball", "a heavy exercise ball", "a weighted fitness ball",
         "a beach ball", "a large inflatable ball", "a colorful beach ball"
     ]
 
@@ -151,8 +150,6 @@ def classify_sports_ball_with_clip(image, box, device=None):
         return "ping pong ball"
     elif "bowling" in best_match:
         return "bowling ball"
-    elif "medicine" in best_match or "fitness" in best_match:
-        return "medicine ball"
     elif "beach" in best_match:
         return "beach ball"
 
@@ -1383,7 +1380,6 @@ def analyze_sports_composition(detections, analysis, img_data):
         'rugby ball': 'Rugby',
         'ping pong ball': 'Table Tennis',
         'bowling ball': 'Bowling',
-        'medicine ball': 'Fitness Training',
         'beach ball': 'Beach Sports'
     }
 
