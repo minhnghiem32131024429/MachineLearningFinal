@@ -5396,7 +5396,22 @@ def generate_sports_caption(analysis_result):
         'skateboarding': ['skate park', 'skateboarder', 'trick', 'jump'],
         'golf': ['course', 'club', 'swing', 'golfer', 'hole'],
         'rugby': ['field', 'tackle', 'player', 'scrum'],
-        'martial arts': ['mat', 'fighter', 'technique', 'match']
+        'martial arts': ['mat', 'fighter', 'technique', 'match'],
+        # Thêm các môn mới
+        'badminton': ['court', 'shuttlecock', 'racket', 'net', 'player', 'match'],
+        'table tennis': ['table', 'paddle', 'ball', 'ping pong', 'player'],
+        'ping pong': ['table', 'paddle', 'ball', 'ping pong', 'player'],
+        'bowling': ['lane', 'pins', 'strike', 'spare', 'bowler'],
+        'cycling': ['bike', 'cyclist', 'race', 'road', 'track'],
+        'motocross': ['bike', 'track', 'jump', 'rider', 'course'],
+        'alpine skiing': ['mountain', 'slope', 'snow', 'skier', 'gates'],
+        'snowboarding': ['mountain', 'slope', 'snow', 'snowboarder', 'halfpipe'],
+        'ultimate frisbee': ['field', 'disc', 'player', 'endzone', 'throw'],
+        'kite sports': ['wind', 'kite', 'beach', 'kitesurfer', 'water'],
+        'american football': ['field', 'touchdown', 'quarterback', 'endzone', 'tackle'],
+        'track and field': ['track', 'field', 'athlete', 'race', 'jump', 'throw'],
+        'athletics': ['track', 'field', 'athlete', 'competition', 'performance'],
+        'beach sports': ['beach', 'sand', 'volleyball', 'player', 'net']
     }
 
     # Determine sport type based on name and equipment
@@ -5691,6 +5706,7 @@ def generate_sports_caption(analysis_result):
                 'digging': ['digging the ball', 'in defensive receive position'],
                 'sprinting': ['in full sprint', 'sprinting at high speed', 'running dynamically'],
                 'running': ['running', 'in motion', 'moving forward'],
+
                 # Boxing/Martial Arts
                 'straight_punch': ['throwing a straight punch', 'executing a jab', 'in punching stance'],
                 'left_hook': ['delivering a left hook', 'swinging a hook punch'],
@@ -5712,7 +5728,55 @@ def generate_sports_caption(analysis_result):
                 'golf_impact': ['at impact with the ball', 'striking the ball'],
                 'golf_follow_through': ['completing the swing', 'in follow-through motion'],
                 'putting': ['putting on the green', 'lining up the putt'],
-                'freestyle_stroke': ['performing a freestyle stroke', 'swimming freestyle']
+
+                # Swimming
+                'freestyle_stroke': ['performing a freestyle stroke', 'swimming freestyle'],
+                'backstroke': ['swimming backstroke', 'executing backstroke technique'],
+                'breaststroke': ['performing breaststroke', 'in breaststroke motion'],
+                'butterfly_stroke': ['executing butterfly stroke', 'performing butterfly technique'],
+                'diving': ['diving into the water', 'executing a competitive dive'],
+
+                # Baseball
+                'batting': ['at bat', 'in batting stance', 'swinging at the ball'],
+                'pitching': ['pitching the ball', 'in throwing motion', 'delivering a pitch'],
+                'catching': ['catching the ball', 'in fielding position'],
+                'base_running': ['running the bases', 'sprinting to base'],
+
+                # Cycling/Motocross
+                'pedaling': ['pedaling intensely', 'cycling at speed', 'in racing position'],
+                'jumping': ['airborne over jump', 'launching off ramp', 'mid-flight'],
+                'cornering': ['leaning into turn', 'navigating corner', 'banking through curve'],
+
+                # Winter Sports
+                'skiing_downhill': ['skiing downhill', 'carving turns', 'descending slope'],
+                'snowboard_carving': ['carving on snowboard', 'linking turns'],
+                'ski_jumping': ['launching off jump', 'airborne on skis'],
+
+                # Water Sports
+                'surfing_wave': ['riding the wave', 'surfing', 'carving across wave face'],
+                'kitesurfing': ['kitesurfing', 'using kite power', 'gliding over water'],
+
+                # Track and Field
+                'high_jumping': ['clearing the bar', 'in high jump', 'arcing over bar'],
+                'long_jumping': ['in long jump', 'leaping forward', 'mid-flight jump'],
+                'pole_vaulting': ['pole vaulting', 'ascending with pole', 'clearing height'],
+                'shot_putting': ['putting the shot', 'in throwing motion'],
+                'discus_throwing': ['throwing discus', 'in rotation', 'releasing discus'],
+                'javelin_throwing': ['throwing javelin', 'in javelin technique'],
+                'hurdle_jumping': ['clearing hurdles', 'jumping over barrier'],
+
+                # Other Sports
+                'skateboarding_trick': ['performing trick', 'executing maneuver', 'mid-trick'],
+                'bowling_delivery': ['delivering ball', 'in bowling motion', 'approaching pins'],
+                'frisbee_throwing': ['throwing disc', 'in frisbee motion', 'releasing disc'],
+                'frisbee_catching': ['catching disc', 'reaching for frisbee'],
+
+                # General athletic actions
+                'jumping': ['jumping', 'in mid-air', 'leaping'],
+                'throwing': ['in throwing motion', 'preparing to throw', 'releasing projectile'],
+                'catching': ['catching', 'reaching for ball', 'in fielding position'],
+                'blocking': ['blocking', 'in defensive position'],
+                'tackling': ['tackling', 'making contact', 'bringing down opponent']
             }
 
             for action_name in action_names:
@@ -5901,10 +5965,18 @@ def generate_smart_suggestion(analysis_result):
         return "Great action shot! Consider varying angles or including more context for visual variety."
 
     # 7. Suggestion chung theo môn thể thao
-    if sport_type.lower() in ['soccer', 'football', 'basketball']:
+    if sport_type.lower() in ['soccer', 'football', 'basketball', 'volleyball', 'rugby']:
         return "For team sports, try capturing player interactions and tactical moments."
-    elif sport_type.lower() in ['tennis', 'golf', 'athletics']:
+    elif sport_type.lower() in ['tennis', 'golf', 'athletics', 'badminton', 'table tennis']:
         return "Focus on technique and form - these sports offer great opportunities for skill showcase."
+    elif sport_type.lower() in ['swimming', 'track and field', 'running', 'cycling']:
+        return "Capture the rhythm and flow of movement - timing is everything in these sports."
+    elif sport_type.lower() in ['boxing', 'martial arts', 'wrestling']:
+        return "Focus on intensity and combat dynamics - capture the decisive moments."
+    elif sport_type.lower() in ['skiing', 'snowboarding', 'surfing', 'skateboarding']:
+        return "Emphasize the relationship with the environment - action sports are about flow and style."
+    elif sport_type.lower() in ['baseball', 'bowling']:
+        return "Anticipate the peak action moments - these sports have distinct climactic instances."
 
     # 8. Default suggestion
     return "Solid sports photography! Experiment with different perspectives to add creative flair."
