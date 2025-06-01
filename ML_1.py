@@ -1966,8 +1966,9 @@ def detect_sports_actions(pose_data, sport_type, image_shape, detected_equipment
             })
 
     # ==================== BOXING/MARTIAL ARTS ====================
-    elif (any(sport in sport_lower for sport in ['boxing', 'martial arts', 'mma', 'karate', 'taekwondo']) and
+    elif (any(sport in sport_lower for sport in ['boxing', 'martial arts', 'mma', 'karate', 'taekwondo']) or
           any(sport in allowed_sports for sport in ['boxing', 'martial arts'])):
+        print(f"DEBUG BOXING - Entering boxing detection. sport_lower: {sport_lower}, allowed_sports: {allowed_sports}")
         action_confidence = 0.0
 
         # 1. PUNCHING - Cải thiện detection logic
@@ -2135,11 +2136,33 @@ def detect_sports_actions(pose_data, sport_type, image_shape, detected_equipment
         punch_conf, punch_type, punch_details = detect_punching_improved()
         guard_conf, guard_details = detect_guard_improved()
         aggressive_conf, aggressive_details = detect_aggressive_stance()
+        # THÊM: Fallback detection cho boxing
+        if max(punch_conf, guard_conf, aggressive_conf) == 0:
+            print("DEBUG BOXING - Trying fallback detection")
+
+            # Fallback 1: Chỉ cần có tay nâng lên
+            if (9 in kp_dict and 10 in kp_dict and 5 in kp_dict and 6 in kp_dict):
+                left_wrist = kp_dict[9]
+                right_wrist = kp_dict[10]
+                left_shoulder = kp_dict[5]
+                right_shoulder = kp_dict[6]
+
+                avg_shoulder_y = (left_shoulder['y'] + right_shoulder['y']) / 2
+
+                # Chỉ cần một tay ngang hoặc cao hơn vai
+                hands_elevated = (left_wrist['y'] <= avg_shoulder_y + height * 0.2 or
+                                  right_wrist['y'] <= avg_shoulder_y + height * 0.2)
+
+                if hands_elevated:
+                    punch_conf = 0.5
+                    punch_type = "boxing_stance"
+                    punch_details = ["Basic boxing position with elevated hands"]
+                    print("DEBUG BOXING - Fallback detection successful")
 
         # Ưu tiên theo confidence
         max_conf = max(punch_conf, guard_conf, aggressive_conf)
 
-        if max_conf == punch_conf and punch_conf > 0.5:
+        if max_conf == punch_conf and punch_conf > 0.4:  # Giảm ngưỡng từ 0.5 xuống 0.4
             action_confidence = punch_conf
             detected_actions.append({
                 'action': punch_type,
@@ -2147,7 +2170,7 @@ def detect_sports_actions(pose_data, sport_type, image_shape, detected_equipment
                 'details': '; '.join(punch_details),
                 'body_part': 'arms'
             })
-        elif max_conf == aggressive_conf and aggressive_conf > 0.5:
+        elif max_conf == aggressive_conf and aggressive_conf > 0.4:  # Giảm ngưỡng
             action_confidence = aggressive_conf
             detected_actions.append({
                 'action': 'aggressive_stance',
@@ -2155,7 +2178,7 @@ def detect_sports_actions(pose_data, sport_type, image_shape, detected_equipment
                 'details': '; '.join(aggressive_details),
                 'body_part': 'full_body'
             })
-        elif max_conf == guard_conf and guard_conf > 0.5:
+        elif max_conf == guard_conf and guard_conf > 0.4:  # Giảm ngưỡng
             action_confidence = guard_conf
             detected_actions.append({
                 'action': 'defensive_guard',
@@ -2497,10 +2520,10 @@ def detect_sports_actions(pose_data, sport_type, image_shape, detected_equipment
 
 
     # ==================== BƠI LỘI (SWIMMING) ====================
-    elif 'swimming' in sport_lower and 'swimming' in allowed_sports:
-        print(f"SWIMMING DEBUG - sport_lower: {sport_lower}, allowed_sports: {allowed_sports}")
-        print(f"Environment sport: {environment_sport}, is_swimming_environment: {is_swimming_environment}")
-        print(f"Available keypoints: {list(kp_dict.keys())}")
+    elif ('swimming' in sport_lower or 'swimming' in allowed_sports or is_swimming_environment):
+        print(f"DEBUG SWIMMING - Entering swimming detection")
+        print(
+            f"sport_lower: {sport_lower}, allowed_sports: {allowed_sports}, is_swimming_environment: {is_swimming_environment}")
         action_confidence = 0.0
 
         # FREESTYLE STROKE - Một tay duỗi về phía trước
@@ -2523,6 +2546,81 @@ def detect_sports_actions(pose_data, sport_type, image_shape, detected_equipment
                     'details': f'{stroke_arm.title()} arm extended for freestyle stroke',
                     'body_part': f'{stroke_arm}_arm'
                 })
+                print(f"SWIMMING DEBUG - Detected freestyle stroke with {stroke_arm} arm")
+
+        # BREASTSTROKE - Cả hai tay ra ngoài
+        if not detected_actions and (9 in kp_dict and 10 in kp_dict and 5 in kp_dict and 6 in kp_dict):
+            left_wrist = kp_dict[9]
+            right_wrist = kp_dict[10]
+            left_shoulder = kp_dict[5]
+            right_shoulder = kp_dict[6]
+
+            # Cả hai tay đều ra ngoài (breaststroke)
+            left_out = abs(left_wrist['x'] - left_shoulder['x']) > width * 0.15
+            right_out = abs(right_wrist['x'] - right_shoulder['x']) > width * 0.15
+
+            if left_out and right_out:
+                action_confidence = 0.7
+                detected_actions.append({
+                    'action': 'breaststroke',
+                    'confidence': action_confidence,
+                    'details': 'Both arms extended for breaststroke motion',
+                    'body_part': 'both_arms'
+                })
+                print(f"SWIMMING DEBUG - Detected breaststroke")
+
+        # BACKSTROKE - Một tay lên cao
+        if not detected_actions and (9 in kp_dict and 10 in kp_dict and 5 in kp_dict and 6 in kp_dict):
+            left_wrist = kp_dict[9]
+            right_wrist = kp_dict[10]
+            left_shoulder = kp_dict[5]
+            right_shoulder = kp_dict[6]
+
+            avg_shoulder_y = (left_shoulder['y'] + right_shoulder['y']) / 2
+
+            # Một tay nâng cao (backstroke)
+            left_high = left_wrist['y'] < avg_shoulder_y - height * 0.1
+            right_high = right_wrist['y'] < avg_shoulder_y - height * 0.1
+
+            if left_high or right_high:
+                action_confidence = 0.65
+                stroke_arm = "left" if left_high else "right"
+                detected_actions.append({
+                    'action': 'backstroke',
+                    'confidence': action_confidence,
+                    'details': f'{stroke_arm.title()} arm raised for backstroke motion',
+                    'body_part': f'{stroke_arm}_arm'
+                })
+                print(f"SWIMMING DEBUG - Detected backstroke with {stroke_arm} arm")
+
+        # DIVING/STARTING POSITION - Cơ thể cúi về phía trước
+        if not detected_actions and (5 in kp_dict and 11 in kp_dict):
+            shoulder = kp_dict[5]
+            hip = kp_dict[11]
+
+            # Cơ thể nghiêng về phía trước (diving stance)
+            forward_lean = shoulder['y'] < hip['y'] - height * 0.05
+
+            if forward_lean:
+                action_confidence = 0.6
+                detected_actions.append({
+                    'action': 'diving_start',
+                    'confidence': action_confidence,
+                    'details': 'Forward lean indicating diving start position',
+                    'body_part': 'full_body'
+                })
+                print(f"SWIMMING DEBUG - Detected diving start position")
+
+        # FALLBACK cho swimming environment
+        if not detected_actions:
+            action_confidence = 0.4
+            detected_actions.append({
+                'action': 'swimming_position',
+                'confidence': action_confidence,
+                'details': 'General swimming position in pool environment',
+                'body_part': 'full_body'
+            })
+            print(f"SWIMMING DEBUG - Using fallback swimming position")
 
     # FALLBACK DETECTION - Cho các trường hợp khó detect
     if not detected_actions and len(kp_dict) >= 8:  # Có đủ keypoints nhưng không detect được action
@@ -2773,23 +2871,35 @@ def analyze_sports_composition(detections, analysis, img_data):
                             detected_sport_from_action = 'Basketball'
                         else:
                             detected_sport_from_action = 'Soccer'  # Default
-    # Quyết định cuối cùng về môn thể thao (ƯU TIÊN: EQUIPMENT -> ENVIRONMENT -> ACTION)
+    # PRIORITY ƯU TIÊN MỚI: ACTION -> EQUIPMENT -> ENVIRONMENT
+    # (để action detection có độ tin cậy cao được ưu tiên)
     decision_log = []
 
-    # PRIORITY 1: Equipment detection (cao nhất)
-    if detected_sport and equipment_confidence > 0.6:
+    # PRIORITY 1: Action detection có confidence cao (ưu tiên nhất)
+    if detected_sport_from_action and action_confidence > 0.7:
+        result['sport_type'] = detected_sport_from_action
+        decision_log.append(f"High-confidence action detection: {detected_sport_from_action} ({action_confidence:.2f})")
+
+    # PRIORITY 2: Equipment detection
+    elif detected_sport and equipment_confidence > 0.6:
         result['sport_type'] = detected_sport
         decision_log.append(f"Equipment detection: {detected_sport} ({equipment_confidence:.2f})")
 
-    # PRIORITY 2: Environment detection (đặc biệt cho swimming)
+    # PRIORITY 3: Action detection với confidence trung bình
+    elif detected_sport_from_action and action_confidence > 0.6:
+        result['sport_type'] = detected_sport_from_action
+        decision_log.append(f"Action detection: {detected_sport_from_action} ({action_confidence:.2f})")
+
+    # PRIORITY 4: Environment detection (đặc biệt cho swimming)
     elif detected_sport_from_env and env_confidence > 0.8:
         result['sport_type'] = detected_sport_from_env
         decision_log.append(f"Environment detection: {detected_sport_from_env} ({env_confidence:.2f})")
 
-    # PRIORITY 3: Action detection (chỉ khi không có equipment)
-    elif detected_sport_from_action and action_confidence > 0.6:
+    # PRIORITY 5: Action detection với confidence thấp hơn
+    elif detected_sport_from_action and action_confidence > 0.5:
         result['sport_type'] = detected_sport_from_action
-        decision_log.append(f"Action detection: {detected_sport_from_action} ({action_confidence:.2f})")
+        decision_log.append(
+            f"Medium-confidence action detection: {detected_sport_from_action} ({action_confidence:.2f})")
 
     # FALLBACKS
     elif detected_sport and equipment_confidence > 0.4:  # Equipment fallback
