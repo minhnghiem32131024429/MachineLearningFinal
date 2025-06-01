@@ -1,7 +1,5 @@
-import random
 import os
 import traceback
-from typing import Dict, List, Optional, Union  # If you're using type hints
 import PIL.Image
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
@@ -13,8 +11,6 @@ import argparse
 import sys
 import math
 import matplotlib
-from sklearn.cluster import KMeans
-from scipy.spatial import ConvexHull
 matplotlib.use('Agg')
 try:
     import clip
@@ -78,7 +74,7 @@ def classify_sports_ball_with_clip(image, box, device=None):
         print(f"Lỗi khi xử lý ảnh bóng: {str(e)}")
         return "sports ball"
 
-    # Danh sách các mô tả về loại bóng (kết hợp nhiều biến thể để tăng độ chính xác)
+    # MỞ RỘNG DANH SÁCH CÁC LOẠI BÓNG CLIP CÓ THỂ PHÂN LOẠI
     ball_descriptions = [
         # Bóng đá
         "a soccer ball", "a white and black soccer ball", "a football used in soccer games",
@@ -113,7 +109,6 @@ def classify_sports_ball_with_clip(image, box, device=None):
         "a bowling ball", "a heavy ball used for bowling", "a black bowling ball",
         "a beach ball", "a large inflatable ball", "a colorful beach ball"
     ]
-
 
     # Mã hóa các mô tả văn bản
     text_inputs = clip.tokenize(ball_descriptions).to(device)
@@ -353,432 +348,6 @@ def select_best_face(faces, image):
 
     return best_face
 
-def get_joint_angle(p1, p2, p3):
-    """Calculate angle between three points (joint angle)"""
-    import numpy as np
-    
-    v1 = np.array([p1[0] - p2[0], p1[1] - p2[1]])
-    v2 = np.array([p3[0] - p2[0], p3[1] - p2[1]])
-    
-    cos_angle = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
-    angle = np.degrees(np.arccos(np.clip(cos_angle, -1.0, 1.0)))
-    
-    return angle
-
-def get_vertical_distance(p1, p2, p3, p4):
-    """Get normalized vertical distance between two point pairs"""
-    y1 = (p1[1] + p2[1])/2  # Average y of first pair
-    y2 = (p3[1] + p4[1])/2  # Average y of second pair
-    return abs(y1 - y2)
-
-def get_horizontal_distance(p1, p2):
-    """Get normalized horizontal distance between two points""" 
-    return abs(p1[0] - p2[0])
-
-
-def detect_baseball_patterns(keypoints, detected_equipment, left_arm_angle, right_arm_angle, spine_angle):
-    """
-    Detect baseball-specific patterns from pose and equipment
-    
-    Args:
-        keypoints: List of body keypoints
-        detected_equipment: List of detected sports equipment
-        left_arm_angle: Angle of left arm
-        right_arm_angle: Angle of right arm
-        spine_angle: Angle of spine relative to vertical
-    
-    Returns:
-        bool: True if baseball pattern detected
-    """
-    # Check for baseball-specific equipment
-    if any(eq.lower() in ['baseball bat', 'baseball', 'baseball glove'] for eq in detected_equipment):
-        # Batting stance detection
-        if (45 <= left_arm_angle <= 135 and 45 <= right_arm_angle <= 135 and 
-            abs(spine_angle) <= 30):
-            return True
-            
-        # Pitching motion detection
-        if (right_arm_angle >= 160 or left_arm_angle >= 160) and abs(spine_angle) <= 20:
-            return True
-            
-    return False
-
-def detect_swimming_patterns(keypoints, spine_angle, arm_spread):
-    """
-    Detect swimming-specific patterns from pose
-    
-    Args:
-        keypoints: List of body keypoints
-        spine_angle: Angle of spine relative to horizontal
-        arm_spread: Angle between arms
-    
-    Returns:
-        bool: True if swimming pattern detected
-    """
-    # Check for horizontal body position
-    if abs(spine_angle - 90) <= 30:
-        # Check for freestyle/butterfly arm position
-        if arm_spread >= 120 and arm_spread <= 180:
-            return True
-            
-        # Check for breaststroke position
-        if arm_spread >= 60 and arm_spread <= 120:
-            return True
-            
-    return False
-
-def detect_volleyball_patterns(keypoints, detected_equipment, left_arm_angle, right_arm_angle, spine_angle):
-    """
-    Detect volleyball-specific patterns from pose and equipment
-    
-    Args:
-        keypoints: List of body keypoints
-        detected_equipment: List of detected sports equipment
-        left_arm_angle: Angle of left arm
-        right_arm_angle: Angle of right arm
-        spine_angle: Angle of spine relative to vertical
-    
-    Returns:
-        bool: True if volleyball pattern detected
-    """
-    # Check for volleyball equipment
-    if any(eq.lower() == 'volleyball' for eq in detected_equipment):
-        # Spiking motion detection
-        if (right_arm_angle >= 150 or left_arm_angle >= 150) and abs(spine_angle) <= 30:
-            return True
-            
-        # Setting motion detection
-        if (90 <= right_arm_angle <= 180 and 90 <= left_arm_angle <= 180):
-            return True
-            
-    return False
-
-def detect_golf_patterns(keypoints, detected_equipment, spine_angle, arm_spread):
-    """
-    Detect golf-specific patterns from pose and equipment
-    
-    Args:
-        keypoints: List of body keypoints
-        detected_equipment: List of detected sports equipment
-        spine_angle: Angle of spine relative to vertical
-        arm_spread: Angle between arms
-    
-    Returns:
-        bool: True if golf pattern detected
-    """
-    # Check for golf equipment
-    if any(eq.lower() in ['golf club', 'golf ball'] for eq in detected_equipment):
-        # Golf swing stance detection
-        if (20 <= abs(spine_angle) <= 45 and 
-            120 <= arm_spread <= 180):
-            return True
-            
-        # Putting stance detection
-        if abs(spine_angle) <= 30 and arm_spread <= 90:
-            return True
-            
-    return False
-
-def detect_rugby_patterns(keypoints, detected_equipment, shoulders_hip_dist, arm_spread):
-    """
-    Detect rugby-specific patterns from pose and equipment
-    
-    Args:
-        keypoints: List of body keypoints
-        detected_equipment: List of detected sports equipment
-        shoulders_hip_dist: Distance between shoulders and hips
-        arm_spread: Angle between arms
-    
-    Returns:
-        bool: True if rugby pattern detected
-    """
-    # Check for rugby equipment
-    if any(eq.lower() == 'rugby ball' for eq in detected_equipment):
-        # Running with ball detection
-        if shoulders_hip_dist >= 0.8 and arm_spread <= 90:
-            return True
-            
-        # Passing motion detection
-        if shoulders_hip_dist >= 0.6 and 90 <= arm_spread <= 180:
-            return True
-            
-    return False
-
-def detect_racket_sport_patterns(keypoints, detected_equipment, left_arm_angle, right_arm_angle, spine_angle):
-    """
-    Detect tennis and badminton specific patterns from pose and equipment
-    
-    Args:
-        keypoints: List of body keypoints
-        detected_equipment: List of detected sports equipment or empty list
-        left_arm_angle: Angle of left arm relative to vertical
-        right_arm_angle: Angle of right arm relative to vertical
-        spine_angle: Angle of spine relative to vertical
-    
-    Returns:
-        bool: True if tennis/badminton pattern detected
-    """
-    # First check if any racket equipment is detected
-    if not any(eq.lower() in ['tennis racket', 'badminton racket', 'racket'] 
-              for eq in (detected_equipment or [])):
-        return False
-
-    # Serving motion detection
-    serving_detected = (
-        (right_arm_angle >= 150 or left_arm_angle >= 150) and  # Raised arm for serve
-        abs(spine_angle) <= 25  # Upright posture during serve
-    )
-
-    # Forehand swing detection
-    forehand_detected = (
-        (45 <= right_arm_angle <= 135 or 45 <= left_arm_angle <= 135) and  # Side arm position
-        abs(spine_angle) <= 40  # Slight forward lean
-    )
-
-    # Backhand swing detection
-    backhand_detected = (
-        (80 <= right_arm_angle <= 160 or 80 <= left_arm_angle <= 160) and  # Cross-body position
-        10 <= abs(spine_angle) <= 45  # Rotated stance
-    )
-
-    # Overhead smash detection
-    smash_detected = (
-        (right_arm_angle >= 160 or left_arm_angle >= 160) and  # High arm position
-        abs(spine_angle) <= 30  # Slightly arched back
-    )
-
-    # Return true if any tennis/badminton pattern is detected
-    return any([serving_detected, forehand_detected, backhand_detected, smash_detected])
-
-
-def analyze_pose_patterns(keypoints, skeleton, sport_type=None, detected_equipment=None, img_data=None):
-    """
-    Comprehensive sport detection system with specific patterns for each supported sport
-    """
-    results = {
-        'identified_sport': None,
-        'confidence': 0.0,
-        'pose_pattern': None,
-        'evidence': []
-    }
-
-    if len(keypoints) < 10:
-        return results
-
-    try:
-        # Get joint angles and positions
-        left_arm_angle = get_joint_angle(keypoints[5], keypoints[7], keypoints[9])
-        right_arm_angle = get_joint_angle(keypoints[6], keypoints[8], keypoints[10])
-        left_leg_angle = get_joint_angle(keypoints[11], keypoints[13], keypoints[15])
-        right_leg_angle = get_joint_angle(keypoints[12], keypoints[14], keypoints[16])
-        
-        # Additional measurements
-        shoulders_hip_dist = get_vertical_distance(keypoints[5], keypoints[6], keypoints[11], keypoints[12])
-        arm_spread = get_horizontal_distance(keypoints[9], keypoints[10])
-        leg_spread = get_horizontal_distance(keypoints[15], keypoints[16])
-        spine_angle = get_body_lean_angle(keypoints[5], keypoints[6], keypoints[11], keypoints[12])
-
-        patterns = []
-
-        # 1. SOCCER/FOOTBALL DETECTION
-        if detect_soccer_patterns(keypoints, detected_equipment, left_leg_angle, right_leg_angle, 
-                                arm_spread, leg_spread):
-            patterns.extend([('Soccer', 0.95, 'soccer_kicking')])
-
-        # 2. BASKETBALL DETECTION
-        if detect_basketball_patterns(keypoints, detected_equipment, left_arm_angle, right_arm_angle,
-                                   shoulders_hip_dist):
-            patterns.extend([('Basketball', 0.90, 'basketball_shooting')])
-
-        # 3. TENNIS/BADMINTON DETECTION
-        if detect_racket_sport_patterns(keypoints, detected_equipment, left_arm_angle, right_arm_angle,
-                                      spine_angle):
-            if 'tennis racket' in (detected_equipment or []):
-                patterns.extend([('Tennis', 0.92, 'tennis_swing')])
-            else:
-                patterns.extend([('Badminton', 0.85, 'badminton_swing')])
-
-        # 4. CYCLING DETECTION
-        if detect_cycling_patterns(keypoints, detected_equipment, spine_angle, shoulders_hip_dist):
-            patterns.extend([('Cycling', 0.95, 'cycling_position')])
-
-        # 5. RUNNING/TRACK DETECTION
-        if detect_running_patterns(keypoints, detected_equipment, left_leg_angle, right_leg_angle,
-                                 arm_spread, spine_angle):
-            patterns.extend([('Running', 0.85, 'running_stride')])
-
-        # 6. BASEBALL DETECTION
-        if detect_baseball_patterns(keypoints, detected_equipment, left_arm_angle, right_arm_angle,
-                                  spine_angle):
-            patterns.extend([('Baseball', 0.88, 'baseball_swing')])
-
-        # 7. SWIMMING DETECTION
-        if detect_swimming_patterns(keypoints, spine_angle, arm_spread):
-            patterns.extend([('Swimming', 0.87, 'swimming_stroke')])
-
-        # 8. VOLLEYBALL DETECTION
-        if detect_volleyball_patterns(keypoints, detected_equipment, left_arm_angle, right_arm_angle,
-                                    spine_angle):
-            patterns.extend([('Volleyball', 0.86, 'volleyball_spike')])
-
-        # 9. GOLF DETECTION
-        if detect_golf_patterns(keypoints, detected_equipment, spine_angle, arm_spread):
-            patterns.extend([('Golf', 0.93, 'golf_swing')])
-
-        # 10. RUGBY DETECTION
-        if detect_rugby_patterns(keypoints, detected_equipment, shoulders_hip_dist, arm_spread):
-            patterns.extend([('Rugby', 0.89, 'rugby_running')])
-
-        # Select best pattern based on confidence and evidence
-        if patterns:
-            patterns.sort(key=lambda x: x[1], reverse=True)
-            best_pattern = patterns[0]
-            results.update({
-                'identified_sport': best_pattern[0],
-                'confidence': best_pattern[1],
-                'pose_pattern': best_pattern[2],
-                'all_patterns': patterns
-            })
-
-    except Exception as e:
-        print(f"Error analyzing pose patterns: {str(e)}")
-        results['evidence'].append(f'Error: {str(e)}')
-
-    return results
-
-# Sport-specific detection functions
-def detect_soccer_patterns(keypoints, equipment, left_leg_angle, right_leg_angle, arm_spread, leg_spread):
-    """Soccer-specific pattern detection"""
-    indicators = 0
-    
-    # Kicking motion
-    if max(left_leg_angle, right_leg_angle) > 120:
-        indicators += 2
-    
-    # Balance position
-    if 45 < arm_spread < 120:
-        indicators += 1
-        
-    # Wide stance
-    if leg_spread > 0.3:
-        indicators += 1
-        
-    # Ball presence
-    if equipment and any(x in ['soccer ball', 'football'] for x in equipment):
-        indicators += 2
-        
-    return indicators >= 3
-
-def detect_basketball_patterns(keypoints, equipment, left_arm_angle, right_arm_angle, shoulders_hip_dist):
-    """Basketball-specific pattern detection"""
-    indicators = 0
-    
-    # Shooting motion
-    if max(left_arm_angle, right_arm_angle) > 150:
-        indicators += 2
-        
-    # Jump shot position
-    if shoulders_hip_dist > 0.25:
-        indicators += 1
-        
-    # Ball presence
-    if equipment and 'basketball' in equipment:
-        indicators += 2
-        
-    return indicators >= 3
-
-def detect_cycling_patterns(keypoints, equipment, spine_angle, shoulders_hip_dist):
-    """Cycling-specific pattern detection"""
-    indicators = 0
-    
-    # Forward lean
-    if spine_angle < 45:
-        indicators += 2
-        
-    # Compact position
-    if shoulders_hip_dist < 0.15:
-        indicators += 1
-        
-    # Bicycle presence
-    if equipment and 'bicycle' in equipment:
-        indicators += 3
-        
-    return indicators >= 4
-
-# Add similar functions for other sports...
-def detect_running_patterns(keypoints, equipment, left_leg_angle, right_leg_angle, arm_spread, spine_angle):
-    """Running-specific pattern detection"""
-    indicators = 0
-    
-    # Alternating leg motion
-    if abs(left_leg_angle - right_leg_angle) > 45:
-        indicators += 2
-        
-    # Upright posture
-    if spine_angle > 75:
-        indicators += 1
-        
-    # Arm pump motion
-    if arm_spread > 0.3:
-        indicators += 1
-        
-    # No equipment dependence for running
-    if not equipment:
-        indicators += 1
-        
-    return indicators >= 3
-
-# ... Add other sport detection functions ...
-
-def get_body_lean_angle(left_shoulder, right_shoulder, left_hip, right_hip):
-    """Calculate body lean angle relative to vertical"""
-    shoulder_mid = ((left_shoulder[0] + right_shoulder[0])/2, 
-                   (left_shoulder[1] + right_shoulder[1])/2)
-    hip_mid = ((left_hip[0] + right_hip[0])/2, 
-               (left_hip[1] + right_hip[1])/2)
-    
-    dx = shoulder_mid[0] - hip_mid[0]
-    dy = shoulder_mid[1] - hip_mid[1]
-    angle = abs(np.degrees(np.arctan2(dx, dy)))
-    
-    return angle
-
-
-def get_body_lean_angle(left_shoulder, right_shoulder, left_hip, right_hip):
-    """Calculate the body's forward/backward lean angle"""
-    # Calculate midpoints
-    shoulder_mid = ((left_shoulder[0] + right_shoulder[0])/2, (left_shoulder[1] + right_shoulder[1])/2)
-    hip_mid = ((left_hip[0] + right_hip[0])/2, (left_hip[1] + right_hip[1])/2)
-    
-    # Calculate angle with vertical
-    dx = shoulder_mid[0] - hip_mid[0]
-    dy = shoulder_mid[1] - hip_mid[1]
-    angle = abs(np.degrees(np.arctan2(dx, dy)))
-    
-    return angle
-
-def get_joint_angle(p1, p2, p3):
-    """Calculate angle between three points (joint angle)"""
-    import numpy as np
-    
-    v1 = np.array([p1[0] - p2[0], p1[1] - p2[1]])
-    v2 = np.array([p3[0] - p2[0], p3[1] - p2[1]])
-    
-    cos_angle = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
-    angle = np.degrees(np.arccos(np.clip(cos_angle, -1.0, 1.0)))
-    
-    return angle
-
-def get_vertical_distance(p1, p2, p3, p4):
-    """Get normalized vertical distance between two point pairs"""
-    y1 = (p1[1] + p2[1])/2  # Average y of first pair
-    y2 = (p3[1] + p4[1])/2  # Average y of second pair
-    return abs(y1 - y2)
-
-def get_horizontal_distance(p1, p2):
-    """Get normalized horizontal distance between two points""" 
-    return abs(p1[0] - p2[0])
-
 def check_dependencies():
     required_packages = {
         'ultralytics': 'ultralytics',
@@ -955,6 +524,7 @@ def detect_sports_objects(yolo, img_data):
 
     return detections
 
+
 def generate_depth_map(midas, img_data):
     with torch.no_grad():
         depth_map = midas(img_data['midas_input'])
@@ -1091,6 +661,7 @@ def analyze_object_sharpness(image, boxes):
 
     return sharpness_scores, sharpness_details
 
+
 def create_sharpness_heatmap(image, sharpness_map=None):
     """
     Tạo heatmap độ sắc nét cho toàn bộ ảnh
@@ -1143,6 +714,7 @@ def create_sharpness_heatmap(image, sharpness_map=None):
             return image.copy(), None
         else:
             return np.zeros((100, 100, 3), dtype=np.uint8), None
+
 
 def analyze_sports_scene(detections, depth_map, img_data, yolo_seg=None):
     """Analyze the sports scene based on detected objects and depth"""
@@ -1342,6 +914,7 @@ def analyze_sports_scene(detections, depth_map, img_data, yolo_seg=None):
 
     return sports_analysis
 
+
 def analyze_action_quality(detections, img_data):
     """Analyze action quality in sports image with improved approach"""
     height, width = img_data['resized_array'].shape[:2]
@@ -1454,6 +1027,7 @@ def verify_face(face_img):
 
     except Exception as e:
         return False, f"Lỗi xác thực: {str(e)}"
+
 
 def analyze_sports_environment(img_data, depth_map=None):
     """
@@ -1628,29 +1202,24 @@ def analyze_sports_environment(img_data, depth_map=None):
 
     return env_results
 
-# Replace the existing detect_human_pose function 
-def detect_human_pose(img_data, conf_threshold=0.15, main_subject_box=None, sport_type=None):
+def detect_human_pose(img_data, conf_threshold=0.15, main_subject_box=None):
+    print("DEBUG - Bắt đầu phát hiện pose")
     """
-    Detect human pose and analyze pose patterns for sport identification
-    
+    Sử dụng YOLOv8-Pose để phát hiện các keypoint trên cơ thể người
+
     Args:
-        img_data: Dict containing image data
-        conf_threshold: Confidence threshold for keypoint detection
-        main_subject_box: Optional bounding box of main subject
-        sport_type: Optional initially detected sport type to refine analysis
-        
+        img_data: Dict chứa ảnh gốc và ảnh đã resize
+        conf_threshold: Ngưỡng confidence cho việc phát hiện
+
     Returns:
-        Dict containing pose information and sport identification
+        Dict: Thông tin về pose các người được phát hiện
     """
     if not POSE_MODEL_AVAILABLE:
         return {"poses": []}
 
-    # Create result structure
+    # Tạo cấu trúc kết quả
     pose_results = {
         "poses": [],
-        "pose_pattern": None,
-        "identified_sport": None,
-        "pattern_confidence": 0.0,
         "keypoint_names": {
             0: "nose", 1: "left_eye", 2: "right_eye", 3: "left_ear", 4: "right_ear",
             5: "left_shoulder", 6: "right_shoulder", 7: "left_elbow", 8: "right_elbow",
@@ -1658,41 +1227,35 @@ def detect_human_pose(img_data, conf_threshold=0.15, main_subject_box=None, spor
             13: "left_knee", 14: "right_knee", 15: "left_ankle", 16: "right_ankle"
         }
     }
-    
-    detected_equipment = []
-    if 'detections' in img_data and 'classes' in img_data['detections']:
-        detected_equipment = [cls for cls in img_data['detections']['classes'] 
-                            if cls in ['sports ball', 'tennis racket', 'baseball bat', 
-                                     'baseball glove', 'bicycle', 'soccer ball', 
-                                     'football', 'rugby ball', 'golf club']]
-        
-    # Load model (only load once)
-    if not hasattr(detect_human_pose, 'model'):
-        print("Loading YOLOv8-Pose model...")
-        detect_human_pose.model = YOLO('yolov8x-pose-p6.pt')
-        print("YOLOv8-Pose model loaded successfully")
 
-    # Predict on image
+    # Load model (chỉ tải một lần)
+    if not hasattr(detect_human_pose, 'model'):
+        print("Đang tải model YOLOv8-Pose...")
+        detect_human_pose.model = YOLO('yolov8x-pose-p6.pt')  # model nhỏ
+        print("Đã tải model YOLOv8-Pose thành công")
+
+    # Dự đoán trên ảnh
     results = detect_human_pose.model(img_data['resized_array'])
 
+    # Chỉ lấy kết quả đầu tiên
     for result in results:
         if hasattr(result, 'keypoints') and result.keypoints is not None:
             keypoints = result.keypoints.data
             for person_id, person_keypoints in enumerate(keypoints):
-                # Create pose entry for each person
+                # Tạo dict chứa thông tin pose của mỗi người
                 person_pose = {
                     "person_id": person_id,
                     "keypoints": [],
-                    "bbox": None,
-                    "pose_analysis": None
+                    "bbox": None
                 }
-
-                # Extract keypoints with confidence above threshold
-                valid_keypoints = {}
                 for kp_id, kp in enumerate(person_keypoints):
                     x, y, conf = kp.tolist()
-                    if conf >= conf_threshold:
-                        valid_keypoints[kp_id] = (float(x), float(y))
+                    # Sử dụng threshold linh hoạt cho các keypoints quan trọng
+                    dynamic_threshold = conf_threshold
+                    if kp_id in [5, 6, 11, 12, 13, 14, 15, 16]:  # Keypoints quan trọng cho thể thao
+                        dynamic_threshold = max(0.08, conf_threshold - 0.05)
+
+                    if conf >= dynamic_threshold:
                         person_pose["keypoints"].append({
                             "id": kp_id,
                             "name": pose_results["keypoint_names"].get(kp_id, f"kp_{kp_id}"),
@@ -1701,7 +1264,7 @@ def detect_human_pose(img_data, conf_threshold=0.15, main_subject_box=None, spor
                             "confidence": float(conf)
                         })
 
-                # Calculate bounding box from keypoints
+                # Tính bounding box từ keypoints
                 if person_pose["keypoints"]:
                     kp_coords = [(kp["x"], kp["y"]) for kp in person_pose["keypoints"]]
                     x_min = min([x for x, _ in kp_coords])
@@ -1710,66 +1273,1427 @@ def detect_human_pose(img_data, conf_threshold=0.15, main_subject_box=None, spor
                     y_max = max([y for _, y in kp_coords])
                     person_pose["bbox"] = [x_min, y_min, x_max, y_max]
 
-                    # Add pose pattern analysis if we have enough keypoints
-                    if len(valid_keypoints) >= 10:
-                        skeleton = [
-                            (5, 7), (7, 9),   # Left arm
-                            (6, 8), (8, 10),  # Right arm
-                            (5, 6),          # Shoulders
-                            (5, 11), (6, 12), # Body
-                            (11, 13), (13, 15), # Left leg
-                            (12, 14), (14, 16), # Right leg
-                            (11, 12)         # Hips
-                        ]
-                        
-                        pose_analysis = analyze_pose_patterns(
-                            valid_keypoints,
-                            skeleton,
-                            sport_type,
-                            detected_equipment,
-                            img_data
-                        )
-                        person_pose["pose_analysis"] = pose_analysis
-
-                        # Update overall results if better confidence found
-                        if pose_analysis["confidence"] > pose_results["pattern_confidence"]:
-                            pose_results["pose_pattern"] = pose_analysis["pose_pattern"]
-                            pose_results["identified_sport"] = pose_analysis["identified_sport"]
-                            pose_results["pattern_confidence"] = pose_analysis["confidence"]
-
-                # Add to results if valid
+                # Thêm vào kết quả
                 if person_pose["keypoints"]:
                     pose_results["poses"].append(person_pose)
 
-    print(f"DEBUG - pose_results has {len(pose_results.get('poses', []))} poses")
+
+    print(f"DEBUG - pose_results có số poses: {len(pose_results.get('poses', []))}")
     return pose_results
 
-def segment_main_subject(img, yolo_seg, main_subject_box):
+def detect_sports_actions(pose_data, sport_type, image_shape, detected_equipment=None, environment_sport=None):
     """
-    Phân đoạn main subject bằng cách so sánh box với masks từ YOLOv8-seg
+    Phát hiện hành động thể thao cụ thể dựa trên pose keypoints với equipment filtering
 
     Args:
-        img: Ảnh cần phân tích (numpy array)
-        yolo_seg: Model YOLOv8-seg đã load
-        main_subject_box: Bounding box của main subject [x1, y1, x2, y2]
+        pose_data: Dữ liệu pose từ detect_human_pose
+        sport_type: Loại thể thao được phát hiện
+        image_shape: Kích thước ảnh (height, width)
+        detected_equipment: List các equipment đã phát hiện
+        environment_sport: Sport type từ environment analysis
 
     Returns:
-        mask: Numpy array chứa mask của main subject hoặc None nếu không tìm thấy
+        Dict: Thông tin về hành động được phát hiện
     """
-    # Chạy YOLOv8-seg để lấy masks
-    results = yolo_seg(img)
+    if not pose_data or 'poses' not in pose_data or not pose_data['poses']:
+        return {'detected_actions': [], 'confidence': 0.0, 'details': 'No pose data available'}
+    # EQUIPMENT FILTERING LOGIC
+    equipment_to_sport = {
+        'tennis racket': 'tennis',
+        'tennis ball': 'tennis',
+        'soccer ball': 'soccer',
+        'basketball': 'basketball',
+        'volleyball': 'volleyball',
+        'baseball bat': 'baseball',
+        'baseball glove': 'baseball',
+        'baseball': 'baseball',
+        'american football': 'football',
+        'golf ball': 'golf',
+        'golf club': 'golf',
+        'boxing gloves': 'boxing',
+        'ping pong ball': 'table tennis',
+        'badminton racket': 'badminton',
+        'skis': 'skiing',
+        'snowboard': 'snowboarding',
+        'surfboard': 'surfing',
+        'skateboard': 'skateboarding',
+        'frisbee': 'frisbee'
+    }
 
+    # Xác định sport từ equipment
+    equipment_detected_sport = None
+    if detected_equipment:
+        for equipment in detected_equipment:
+            if equipment.lower() in equipment_to_sport:
+                equipment_detected_sport = equipment_to_sport[equipment.lower()]
+                print(f"Equipment-based sport detection: {equipment} -> {equipment_detected_sport}")
+                break
+
+    # Kiểm tra swimming từ environment (đặc biệt)
+    is_swimming_environment = False
+    if environment_sport and 'swimming' in environment_sport.lower():
+        is_swimming_environment = True
+        print("Swimming detected from environment analysis")
+
+    # FILTERING RULES - SỬA LẠI:
+    # 1. Nếu có equipment, chỉ detect action của sport đó
+    # 2. Nếu environment detect swimming, thêm swimming vào allowed
+    # 3. Nếu không có equipment, cho phép sports không cần equipment + swimming nếu có
+
+    allowed_sports = []
+
+    if equipment_detected_sport:
+        # Chỉ cho phép sport từ equipment
+        allowed_sports = [equipment_detected_sport]
+        # NHƯNG vẫn cho phép swimming nếu environment detect
+        if is_swimming_environment:
+            allowed_sports.append('swimming')
+        print(f"Action detection limited to: {allowed_sports}")
+    else:
+        # Không có equipment - cho phép sports không cần equipment cụ thể
+        allowed_sports = ['soccer', 'basketball', 'volleyball', 'running', 'track', 'boxing', 'martial arts']
+        # LUÔN LUÔN thêm swimming nếu environment detect
+        if is_swimming_environment:
+            allowed_sports.append('swimming')
+        print(f"No equipment detected - allowed sports: {allowed_sports}")
+
+    height, width = image_shape[:2]
+    detected_actions = []
+
+    # Lấy pose chính (thường là pose đầu tiên hoặc có nhiều keypoints nhất)
+    main_pose = None
+    max_keypoints = 0
+
+    for pose in pose_data['poses']:
+        if len(pose.get('keypoints', [])) > max_keypoints:
+            max_keypoints = len(pose.get('keypoints', []))
+            main_pose = pose
+
+    if not main_pose or not main_pose.get('keypoints'):
+        return {'detected_actions': [], 'confidence': 0.0, 'details': 'No valid pose found'}
+
+    # Tạo dict keypoints để dễ truy cập
+    kp_dict = {}
+    for kp in main_pose['keypoints']:
+        if kp['confidence'] > 0.3:  # Chỉ lấy keypoints có độ tin cậy cao
+            kp_dict[kp['id']] = {
+                'x': kp['x'],
+                'y': kp['y'],
+                'confidence': kp['confidence'],
+                'name': kp['name']
+            }
+
+    # Định nghĩa keypoints theo COCO format
+    # 0: nose, 1: left_eye, 2: right_eye, 3: left_ear, 4: right_ear,
+    # 5: left_shoulder, 6: right_shoulder, 7: left_elbow, 8: right_elbow,
+    # 9: left_wrist, 10: right_wrist, 11: left_hip, 12: right_hip,
+    # 13: left_knee, 14: right_knee, 15: left_ankle, 16: right_ankle
+
+    def calculate_angle(p1, p2, p3):
+        """Tính góc tại điểm p2 giữa p1-p2-p3"""
+        try:
+            import math
+            v1 = (p1['x'] - p2['x'], p1['y'] - p2['y'])
+            v2 = (p3['x'] - p2['x'], p3['y'] - p2['y'])
+
+            dot_product = v1[0] * v2[0] + v1[1] * v2[1]
+            mag1 = math.sqrt(v1[0] ** 2 + v1[1] ** 2)
+            mag2 = math.sqrt(v2[0] ** 2 + v2[1] ** 2)
+
+            if mag1 == 0 or mag2 == 0:
+                return 0
+
+            cos_angle = dot_product / (mag1 * mag2)
+            cos_angle = max(-1, min(1, cos_angle))  # Clamp to [-1, 1]
+            angle = math.acos(cos_angle) * 180 / math.pi
+            return angle
+        except:
+            return 0
+
+    def get_body_orientation():
+        """Xác định hướng của cơ thể (trước/sau/trái/phải)"""
+        orientation = "unknown"
+
+        # Kiểm tra vai
+        if 5 in kp_dict and 6 in kp_dict:  # left_shoulder, right_shoulder
+            left_shoulder = kp_dict[5]
+            right_shoulder = kp_dict[6]
+            shoulder_width = abs(left_shoulder['x'] - right_shoulder['x'])
+
+            # Nếu vai rộng -> nhìn trước/sau
+            # Nếu vai hẹp -> nhìn nghiêng
+            if shoulder_width > width * 0.15:  # Vai rộng
+                # Kiểm tra mũi để xác định trước/sau
+                if 0 in kp_dict:  # nose
+                    nose = kp_dict[0]
+                    shoulder_center_x = (left_shoulder['x'] + right_shoulder['x']) / 2
+                    nose_offset = abs(nose['x'] - shoulder_center_x)
+
+                    if nose_offset < width * 0.05:  # Mũi ở giữa
+                        orientation = "front"
+                    else:
+                        orientation = "front_angled"
+                else:
+                    orientation = "front"
+            else:  # Vai hẹp - nhìn nghiêng
+                # Xác định trái/phải dựa trên vị trí vai
+                if left_shoulder['x'] < right_shoulder['x']:
+                    orientation = "left_side"
+                else:
+                    orientation = "right_side"
+
+        return orientation
+
+    # Xác định hướng cơ thể
+    body_orientation = get_body_orientation()
+
+    # PHÂN TÍCH HÀNH ĐỘNG THEO TỪNG MÔN THỂ THAO
+    sport_lower = sport_type.lower()
+
+    # ==================== BÓNG ĐÁ (SOCCER) ====================
+    if ('soccer' in sport_lower or 'football' in sport_lower) and 'soccer' in allowed_sports:
+        action_confidence = 0.0
+
+        # 1. PRE-KICK STANCE - Tư thế chuẩn bị đá bóng
+        def detect_pre_kick_stance():
+            confidence = 0.0
+            details = []
+
+            # Kiểm tra chân trụ và chân đá
+            if (11 in kp_dict and 12 in kp_dict and 13 in kp_dict and 14 in kp_dict and
+                    15 in kp_dict and 16 in kp_dict):
+
+                left_hip = kp_dict[11]
+                right_hip = kp_dict[12]
+                left_knee = kp_dict[13]
+                right_knee = kp_dict[14]
+                left_ankle = kp_dict[15]
+                right_ankle = kp_dict[16]
+
+                # Tính khoảng cách giữa hai chân (stance width)
+                ankle_distance = abs(left_ankle['x'] - right_ankle['x'])
+                hip_width = abs(left_hip['x'] - right_hip['x'])
+
+                # Stance rộng hơn bình thường (chuẩn bị đá)
+                wide_stance = ankle_distance > hip_width * 1.5
+
+                # Kiểm tra trọng tâm nghiêng (weight shift)
+                # Chân trụ thẳng, chân đá hơi gấp
+                left_knee_angle = calculate_angle(left_hip, left_knee, left_ankle)
+                right_knee_angle = calculate_angle(right_hip, right_knee, right_ankle)
+
+                # Một chân thẳng (supporting leg), một chân hơi gấp (kicking leg)
+                straight_leg = left_knee_angle > 160 or right_knee_angle > 160
+                bent_leg = left_knee_angle < 140 or right_knee_angle < 140
+
+                # Chân đá hơi nâng hoặc lùi về phía sau
+                if left_knee_angle < right_knee_angle:  # Left leg is kicking leg
+                    kicking_leg_back = left_ankle['x'] < right_ankle['x'] - width * 0.05
+                    kicking_leg_lifted = left_ankle['y'] < right_ankle['y']
+                    kicking_side = "left"
+                else:  # Right leg is kicking leg
+                    kicking_leg_back = right_ankle['x'] > left_ankle['x'] + width * 0.05
+                    kicking_leg_lifted = right_ankle['y'] < left_ankle['y']
+                    kicking_side = "right"
+
+                # Tính điểm confidence
+                score = 0.0
+                if wide_stance:
+                    score += 0.3
+                    details.append("wide stance detected")
+
+                if straight_leg and bent_leg:
+                    score += 0.4
+                    details.append("supporting leg positioned")
+
+                if kicking_leg_back or kicking_leg_lifted:
+                    score += 0.3
+                    details.append(f"{kicking_side} leg in pre-kick position")
+
+                confidence = min(0.85, score)
+
+            return confidence, details
+
+        # 2. SHOOTING/KICKING - Đang thực hiện cú đá
+        def detect_shooting():
+            confidence = 0.0
+            details = []
+
+            if 13 in kp_dict and 15 in kp_dict and 11 in kp_dict:  # left_knee, left_ankle, left_hip
+                left_knee = kp_dict[13]
+                left_ankle = kp_dict[15]
+                left_hip = kp_dict[11]
+
+                # Tính góc chân trái
+                knee_angle = calculate_angle(left_hip, left_knee, left_ankle)
+
+                # Kiểm tra chân có đang duỗi không (shooting motion)
+                if knee_angle > 140:  # Chân duỗi
+                    # Kiểm tra độ cao của chân
+                    if left_ankle['y'] < left_hip['y']:  # Chân nâng cao
+                        confidence = 0.8
+                        details.append(f'Left leg extended for shot (angle: {knee_angle:.1f}°)')
+
+            # Kiểm tra chân phải tương tự
+            if 14 in kp_dict and 16 in kp_dict and 12 in kp_dict:  # right_knee, right_ankle, right_hip
+                right_knee = kp_dict[14]
+                right_ankle = kp_dict[16]
+                right_hip = kp_dict[12]
+
+                knee_angle = calculate_angle(right_hip, right_knee, right_ankle)
+
+                if knee_angle > 140 and right_ankle['y'] < right_hip['y']:
+                    confidence = max(confidence, 0.8)
+                    details.append(f'Right leg extended for shot (angle: {knee_angle:.1f}°)')
+
+            return confidence, details
+
+        # 3. APPROACH RUN - Chạy tới để đá bóng
+        def detect_approach_run():
+            confidence = 0.0
+            details = []
+
+            if (13 in kp_dict and 14 in kp_dict and 15 in kp_dict and 16 in kp_dict and
+                    5 in kp_dict and 11 in kp_dict):
+
+                left_knee = kp_dict[13]
+                right_knee = kp_dict[14]
+                shoulder = kp_dict[5]
+                hip = kp_dict[11]
+
+                # Kiểm tra bước chạy (một chân nâng cao)
+                ground_level = height * 0.9
+                high_knee = (left_knee['y'] < ground_level * 0.8 or
+                             right_knee['y'] < ground_level * 0.8)
+
+                # Cơ thể nghiêng về phía trước (running lean)
+                forward_lean = shoulder['y'] < hip['y'] - height * 0.02
+
+                if high_knee and forward_lean:
+                    confidence = 0.7
+                    details.append("Running approach with forward lean")
+
+            return confidence, details
+
+        # 4. DRIBBLING - Giữ bóng, di chuyển
+        def detect_dribbling():
+            confidence = 0.0
+            details = []
+
+            if (13 in kp_dict and 15 in kp_dict and 14 in kp_dict and 16 in kp_dict and
+                    5 in kp_dict and 11 in kp_dict):
+
+                left_ankle = kp_dict[15]
+                right_ankle = kp_dict[16]
+                shoulder = kp_dict[5]
+                hip = kp_dict[11]
+
+                # Cả hai chân gần đất (controlling stance)
+                ground_level = height * 0.9
+                both_feet_low = (left_ankle['y'] > ground_level * 0.85 and
+                                 right_ankle['y'] > ground_level * 0.85)
+
+                # Cơ thể hơi nghiêng để kiểm soát bóng
+                slight_lean = abs(shoulder['y'] - hip['y']) < height * 0.08
+
+                if both_feet_low and slight_lean:
+                    confidence = 0.7
+                    details.append('Low stance with controlled ball movement')
+
+            return confidence, details
+
+        # Chạy tất cả detections
+        pre_kick_conf, pre_kick_details = detect_pre_kick_stance()
+        shooting_conf, shooting_details = detect_shooting()
+        approach_conf, approach_details = detect_approach_run()
+        dribbling_conf, dribbling_details = detect_dribbling()
+
+        # Ưu tiên theo thứ tự: shooting > pre_kick > approach > dribbling
+        if shooting_conf > 0.6:
+            action_confidence = shooting_conf
+            detected_actions.append({
+                'action': 'shooting',
+                'confidence': shooting_conf,
+                'details': '; '.join(shooting_details),
+                'body_part': 'legs'
+            })
+        elif pre_kick_conf > 0.5:
+            action_confidence = pre_kick_conf
+            detected_actions.append({
+                'action': 'pre_kick_stance',
+                'confidence': pre_kick_conf,
+                'details': '; '.join(pre_kick_details),
+                'body_part': 'full_body'
+            })
+        elif approach_conf > 0.5:
+            action_confidence = approach_conf
+            detected_actions.append({
+                'action': 'approach_run',
+                'confidence': approach_conf,
+                'details': '; '.join(approach_details),
+                'body_part': 'full_body'
+            })
+        elif dribbling_conf > 0.5:
+            action_confidence = dribbling_conf
+            detected_actions.append({
+                'action': 'dribbling',
+                'confidence': dribbling_conf,
+                'details': '; '.join(dribbling_details),
+                'body_part': 'full_body'
+            })
+
+    # ==================== BÓNG RỔ (BASKETBALL) ====================
+    elif 'basketball' in sport_lower and 'basketball' in allowed_sports:
+        action_confidence = 0.0
+
+        # 1. SHOOTING - Tay nâng cao, khuỷu tay gấp
+        if (9 in kp_dict and 10 in kp_dict and 7 in kp_dict and 8 in kp_dict and
+                5 in kp_dict and 6 in kp_dict):
+
+            left_wrist = kp_dict[9]
+            right_wrist = kp_dict[10]
+            left_elbow = kp_dict[7]
+            right_elbow = kp_dict[8]
+            left_shoulder = kp_dict[5]
+            right_shoulder = kp_dict[6]
+
+            # Kiểm tra tay có nâng cao không
+            avg_shoulder_y = (left_shoulder['y'] + right_shoulder['y']) / 2
+            hands_raised = (left_wrist['y'] < avg_shoulder_y or right_wrist['y'] < avg_shoulder_y)
+
+            if hands_raised:
+                # Tính góc khuỷu tay
+                left_elbow_angle = calculate_angle(left_shoulder, left_elbow, left_wrist)
+                right_elbow_angle = calculate_angle(right_shoulder, right_elbow, right_wrist)
+
+                # Góc khuỷu trong khoảng shooting (60-120 độ)
+                shooting_angles = (60 <= left_elbow_angle <= 120 or 60 <= right_elbow_angle <= 120)
+
+                if shooting_angles:
+                    action_confidence = 0.85
+                    detected_actions.append({
+                        'action': 'shooting',
+                        'confidence': action_confidence,
+                        'details': f'Arms raised for shot (L: {left_elbow_angle:.1f}°, R: {right_elbow_angle:.1f}°)',
+                        'body_part': 'arms'
+                    })
+
+        # 2. DRIBBLING - Một tay xuống thấp, cơ thể cúi
+        if (9 in kp_dict and 10 in kp_dict and 5 in kp_dict and 11 in kp_dict):
+            left_wrist = kp_dict[9]
+            right_wrist = kp_dict[10]
+            shoulder = kp_dict[5]
+            hip = kp_dict[11]
+
+            # Một tay thấp hơn hông
+            low_hand = (left_wrist['y'] > hip['y'] or right_wrist['y'] > hip['y'])
+
+            # Cơ thể hơi cúi
+            body_lean = shoulder['y'] < hip['y'] + height * 0.1
+
+            if low_hand and body_lean:
+                action_confidence = max(action_confidence, 0.75)
+                detected_actions.append({
+                    'action': 'dribbling',
+                    'confidence': 0.75,
+                    'details': 'Low hand position with controlled dribble stance',
+                    'body_part': 'arms'
+                })
+
+    # ==================== TENNIS ====================
+    elif 'tennis' in sport_lower and 'tennis' in allowed_sports:
+        action_confidence = 0.0
+
+        # 1. SERVING - Một tay nâng cao (lempar bóng), tay kia chuẩn bị đánh
+        if (9 in kp_dict and 10 in kp_dict and 7 in kp_dict and 8 in kp_dict and
+                5 in kp_dict and 6 in kp_dict):
+
+            left_wrist = kp_dict[9]
+            right_wrist = kp_dict[10]
+            left_shoulder = kp_dict[5]
+            right_shoulder = kp_dict[6]
+
+            avg_shoulder_y = (left_shoulder['y'] + right_shoulder['y']) / 2
+
+            # Kiểm tra một tay nâng rất cao (lempar bóng)
+            left_very_high = left_wrist['y'] < avg_shoulder_y - height * 0.15
+            right_very_high = right_wrist['y'] < avg_shoulder_y - height * 0.15
+
+            if left_very_high or right_very_high:
+                action_confidence = 0.8
+                serving_hand = "left" if left_very_high else "right"
+                detected_actions.append({
+                    'action': 'serving',
+                    'confidence': action_confidence,
+                    'details': f'{serving_hand.title()} hand raised for ball toss',
+                    'body_part': f'{serving_hand}_arm'
+                })
+
+        # 2. FOREHAND/BACKHAND - Tay duỗi ra một bên
+        if (9 in kp_dict and 10 in kp_dict and 5 in kp_dict and 6 in kp_dict):
+            left_wrist = kp_dict[9]
+            right_wrist = kp_dict[10]
+            left_shoulder = kp_dict[5]
+            right_shoulder = kp_dict[6]
+
+            shoulder_center_x = (left_shoulder['x'] + right_shoulder['x']) / 2
+
+            # Kiểm tra tay duỗi ra xa khỏi cơ thể
+            left_extended = abs(left_wrist['x'] - shoulder_center_x) > width * 0.15
+            right_extended = abs(right_wrist['x'] - shoulder_center_x) > width * 0.15
+
+            if left_extended or right_extended:
+                action_confidence = max(action_confidence, 0.7)
+                stroke_type = "forehand" if (
+                            left_extended and body_orientation in ["front", "left_side"]) else "backhand"
+                detected_actions.append({
+                    'action': stroke_type,
+                    'confidence': 0.7,
+                    'details': f'Arm extended for {stroke_type} stroke',
+                    'body_part': 'arms'
+                })
+
+    # ==================== BÓNG CHUYỀN (VOLLEYBALL) ====================
+    elif 'volleyball' in sport_lower and 'volleyball' in allowed_sports:
+        action_confidence = 0.0
+
+        # 1. SPIKING - Nhiều biến thể tư thế tay
+        def detect_spiking_variations():
+            confidence = 0.0
+            details = []
+            spike_type = "unknown"
+
+            if (9 in kp_dict and 10 in kp_dict and 7 in kp_dict and 8 in kp_dict and
+                    5 in kp_dict and 6 in kp_dict):
+
+                left_wrist = kp_dict[9]
+                right_wrist = kp_dict[10]
+                left_elbow = kp_dict[7]
+                right_elbow = kp_dict[8]
+                left_shoulder = kp_dict[5]
+                right_shoulder = kp_dict[6]
+
+                avg_shoulder_y = (left_shoulder['y'] + right_shoulder['y']) / 2
+
+                # VARIATION 1: Classic Spike - Một tay cao, một tay thấp
+                left_very_high = left_wrist['y'] < avg_shoulder_y - height * 0.15
+                right_very_high = right_wrist['y'] < avg_shoulder_y - height * 0.15
+                left_moderate = avg_shoulder_y - height * 0.15 <= left_wrist['y'] < avg_shoulder_y
+                right_moderate = avg_shoulder_y - height * 0.15 <= right_wrist['y'] < avg_shoulder_y
+
+                if (left_very_high and right_moderate) or (right_very_high and left_moderate):
+                    confidence = 0.85
+                    spike_type = "classic_spike"
+                    hitting_hand = "left" if left_very_high else "right"
+                    details.append(f"{hitting_hand} hand in classic spike position")
+
+                # VARIATION 2: Two-Hand Spike Preparation - Cả hai tay cao
+                elif left_very_high and right_very_high:
+                    # Kiểm tra tay nào cao hơn
+                    height_diff = abs(left_wrist['y'] - right_wrist['y'])
+                    if height_diff > height * 0.08:
+                        confidence = 0.8
+                        spike_type = "power_spike_prep"
+                        higher_hand = "left" if left_wrist['y'] < right_wrist['y'] else "right"
+                        details.append(f"Two-hand spike prep, {higher_hand} hand leading")
+                    else:
+                        confidence = 0.75
+                        spike_type = "double_hand_spike"
+                        details.append("Both hands equally high for power spike")
+
+                # VARIATION 3: Quick Attack - Tay ngắn, nhanh
+                elif (left_moderate and right_moderate):
+                    # Kiểm tra góc khuỷu tay (quick attack có góc nhỏ hơn)
+                    left_elbow_angle = calculate_angle(left_shoulder, left_elbow, left_wrist)
+                    right_elbow_angle = calculate_angle(right_shoulder, right_elbow, right_wrist)
+
+                    quick_angle = left_elbow_angle < 100 or right_elbow_angle < 100
+                    if quick_angle:
+                        confidence = 0.7
+                        spike_type = "quick_attack"
+                        details.append("Compact arm position for quick attack")
+
+                # VARIATION 4: Back Row Attack - Tay cao, cơ thể nghiêng
+                if confidence > 0 and 11 in kp_dict:  # Có detect spike + có hip data
+                    hip = kp_dict[11]
+                    body_lean = abs(avg_shoulder_y - hip['y']) > height * 0.15
+                    if body_lean:
+                        confidence += 0.1
+                        spike_type += "_back_row"
+                        details.append("body lean indicates back row attack")
+
+                # VARIATION 5: Cross-Court vs Line Shot - Dựa vào hướng tay
+                if confidence > 0:
+                    hitting_hand_x = left_wrist['x'] if left_very_high else right_wrist['x']
+                    body_center_x = (left_shoulder['x'] + right_shoulder['x']) / 2
+
+                    cross_court = abs(hitting_hand_x - body_center_x) > width * 0.1
+                    if cross_court:
+                        details.append("cross-court angle detected")
+                    else:
+                        details.append("straight line attack angle")
+
+            return confidence, spike_type, details
+
+        # 2. SETTING - Cả hai tay nâng lên ở mức vai
+        def detect_setting():
+            confidence = 0.0
+            details = []
+
+            if (9 in kp_dict and 10 in kp_dict and 5 in kp_dict and 6 in kp_dict):
+                left_wrist = kp_dict[9]
+                right_wrist = kp_dict[10]
+                left_shoulder = kp_dict[5]
+                right_shoulder = kp_dict[6]
+
+                # Cả hai tay ngang mức vai hoặc hơi cao hơn
+                hands_at_shoulder_level = (
+                        abs(left_wrist['y'] - left_shoulder['y']) < height * 0.1 and
+                        abs(right_wrist['y'] - right_shoulder['y']) < height * 0.1
+                )
+
+                # Hai tay gần nhau (setting position)
+                hands_close = abs(left_wrist['x'] - right_wrist['x']) < width * 0.15
+
+                if hands_at_shoulder_level and hands_close:
+                    confidence = 0.75
+                    details.append("Both hands positioned for setting")
+
+            return confidence, details
+
+        # 3. BLOCKING - Variations of blocking positions
+        def detect_blocking_variations():
+            confidence = 0.0
+            details = []
+            block_type = "unknown"
+
+            if (9 in kp_dict and 10 in kp_dict and 7 in kp_dict and 8 in kp_dict):
+                left_wrist = kp_dict[9]
+                right_wrist = kp_dict[10]
+                left_elbow = kp_dict[7]
+                right_elbow = kp_dict[8]
+
+                # VARIATION 1: Classic Block - Cả hai tay thẳng lên
+                left_arm_vertical = abs(left_wrist['x'] - left_elbow['x']) < width * 0.08
+                right_arm_vertical = abs(right_wrist['x'] - right_elbow['x']) < width * 0.08
+
+                if left_arm_vertical and right_arm_vertical:
+                    confidence = 0.8
+                    block_type = "double_block"
+                    details.append("Classic double-hand block position")
+
+                # VARIATION 2: Single Block - Một tay chặn
+                elif left_arm_vertical or right_arm_vertical:
+                    confidence = 0.7
+                    block_type = "single_block"
+                    blocking_hand = "left" if left_arm_vertical else "right"
+                    details.append(f"{blocking_hand} hand single block")
+
+                # VARIATION 3: Soft Block/Tool - Tay hơi nghiêng
+                else:
+                    # Kiểm tra tay có nâng cao không nhưng không thẳng
+                    hands_raised = (left_wrist['y'] < left_elbow['y'] and
+                                    right_wrist['y'] < right_elbow['y'])
+                    if hands_raised:
+                        confidence = 0.6
+                        block_type = "soft_block"
+                        details.append("Angled hands for soft block or tool")
+
+            return confidence, block_type, details
+
+        # 4. DIGGING/RECEIVE - Tay xuống thấp
+        def detect_digging():
+            confidence = 0.0
+            details = []
+
+            if (9 in kp_dict and 10 in kp_dict and 11 in kp_dict):
+                left_wrist = kp_dict[9]
+                right_wrist = kp_dict[10]
+                hip = kp_dict[11]
+
+                # Cả hai tay thấp hơn hông
+                hands_low = (left_wrist['y'] > hip['y'] and right_wrist['y'] > hip['y'])
+
+                # Hai tay gần nhau (platform)
+                hands_together = abs(left_wrist['x'] - right_wrist['x']) < width * 0.12
+
+                if hands_low and hands_together:
+                    confidence = 0.75
+                    details.append("Low platform position for dig/receive")
+
+            return confidence, details
+
+        # Chạy tất cả detections
+        spike_conf, spike_type, spike_details = detect_spiking_variations()
+        setting_conf, setting_details = detect_setting()
+        block_conf, block_type, block_details = detect_blocking_variations()
+        dig_conf, dig_details = detect_digging()
+
+        # Ưu tiên theo confidence score
+        max_conf = max(spike_conf, setting_conf, block_conf, dig_conf)
+
+        if max_conf == spike_conf and spike_conf > 0.5:
+            action_confidence = spike_conf
+            detected_actions.append({
+                'action': spike_type,
+                'confidence': spike_conf,
+                'details': '; '.join(spike_details),
+                'body_part': 'arms'
+            })
+        elif max_conf == block_conf and block_conf > 0.5:
+            action_confidence = block_conf
+            detected_actions.append({
+                'action': block_type,
+                'confidence': block_conf,
+                'details': '; '.join(block_details),
+                'body_part': 'arms'
+            })
+        elif max_conf == setting_conf and setting_conf > 0.5:
+            action_confidence = setting_conf
+            detected_actions.append({
+                'action': 'setting',
+                'confidence': setting_conf,
+                'details': '; '.join(setting_details),
+                'body_part': 'both_arms'
+            })
+        elif max_conf == dig_conf and dig_conf > 0.5:
+            action_confidence = dig_conf
+            detected_actions.append({
+                'action': 'digging',
+                'confidence': dig_conf,
+                'details': '; '.join(dig_details),
+                'body_part': 'both_arms'
+            })
+
+    # ==================== BOXING/MARTIAL ARTS ====================
+    elif (any(sport in sport_lower for sport in ['boxing', 'martial arts', 'mma', 'karate', 'taekwondo']) or
+          any(sport in allowed_sports for sport in ['boxing', 'martial arts'])):
+        print(f"DEBUG BOXING - Entering boxing detection. sport_lower: {sport_lower}, allowed_sports: {allowed_sports}")
+        action_confidence = 0.0
+
+        # 1. PUNCHING - Cải thiện detection logic
+        def detect_punching_improved():
+            confidence = 0.0
+            details = []
+            punch_type = "unknown"
+
+            if (9 in kp_dict and 10 in kp_dict and 7 in kp_dict and 8 in kp_dict and
+                    5 in kp_dict and 6 in kp_dict):
+
+                left_wrist = kp_dict[9]
+                right_wrist = kp_dict[10]
+                left_elbow = kp_dict[7]
+                right_elbow = kp_dict[8]
+                left_shoulder = kp_dict[5]
+                right_shoulder = kp_dict[6]
+
+                # CẢI THIỆN 1: Giảm ngưỡng extension ratio
+                shoulder_width = abs(left_shoulder['x'] - right_shoulder['x'])
+                left_extension = abs(left_wrist['x'] - left_shoulder['x'])
+                right_extension = abs(right_wrist['x'] - right_shoulder['x'])
+
+                # GIẢM NGƯỠNG từ 0.8 xuống 0.5
+                left_extended = left_extension > shoulder_width * 0.5
+                right_extended = right_extension > shoulder_width * 0.5
+
+                # CẢI THIỆN 2: Kiểm tra độ cao tay (boxing stance)
+                avg_shoulder_y = (left_shoulder['y'] + right_shoulder['y']) / 2
+                left_hand_elevated = left_wrist['y'] < avg_shoulder_y + height * 0.15  # Tay ở mức vai hoặc cao hơn
+                right_hand_elevated = right_wrist['y'] < avg_shoulder_y + height * 0.15
+
+                # STRAIGHT PUNCH - Tay duỗi thẳng ra
+                if left_extended or right_extended:
+                    punching_hand = "left" if left_extended else "right"
+                    punch_height = left_wrist['y'] if left_extended else right_wrist['y']
+                    shoulder_height = left_shoulder['y'] if left_extended else right_shoulder['y']
+
+                    if abs(punch_height - shoulder_height) < height * 0.15:  # Tăng tolerance
+                        punch_type = "straight_punch"
+                        confidence = 0.85
+                        details.append(f"{punching_hand} straight punch at head level")
+                    else:
+                        punch_type = "body_shot"
+                        confidence = 0.8
+                        details.append(f"{punching_hand} body shot")
+
+                # CẢI THIỆN 3: HOOK PUNCH - Giảm yêu cầu góc khuỷu
+                elif not (left_extended or right_extended):
+                    left_elbow_angle = calculate_angle(left_shoulder, left_elbow, left_wrist)
+                    right_elbow_angle = calculate_angle(right_shoulder, right_elbow, right_wrist)
+
+                    # GIẢM YÊU CẦU từ 60-90 xuống 45-110
+                    if 45 <= left_elbow_angle <= 110 and left_hand_elevated:
+                        punch_type = "left_hook"
+                        confidence = 0.8
+                        details.append(f"Left hook with {left_elbow_angle:.1f}° elbow angle")
+                    elif 45 <= right_elbow_angle <= 110 and right_hand_elevated:
+                        punch_type = "right_hook"
+                        confidence = 0.8
+                        details.append(f"Right hook with {right_elbow_angle:.1f}° elbow angle")
+
+                # CẢI THIỆN 4: BOXING STANCE DETECTION (mới)
+                if confidence == 0.0:
+                    # Kiểm tra tư thế boxing cơ bản (cả 2 tay nâng lên)
+                    both_hands_up = left_hand_elevated and right_hand_elevated
+
+                    if both_hands_up:
+                        # Kiểm tra khoảng cách tay (boxing guard)
+                        hand_distance = abs(left_wrist['x'] - right_wrist['x'])
+
+                        if hand_distance > shoulder_width * 0.3:  # Tay rộng ra
+                            punch_type = "boxing_stance"
+                            confidence = 0.7
+                            details.append("Active boxing stance with hands up")
+                        else:
+                            punch_type = "defensive_guard"
+                            confidence = 0.75
+                            details.append("Tight defensive guard position")
+
+                # CẢI THIỆN 5: UPPERCUT - Mở rộng detection
+                if confidence == 0.0:
+                    left_rising = left_wrist['y'] < avg_shoulder_y and left_elbow['y'] > left_wrist['y']
+                    right_rising = right_wrist['y'] < avg_shoulder_y and right_elbow['y'] > right_wrist['y']
+
+                    if left_rising or right_rising:
+                        punch_type = "uppercut"
+                        confidence = 0.75
+                        rising_hand = "left" if left_rising else "right"
+                        details.append(f"{rising_hand} uppercut motion")
+
+
+
+            return confidence, punch_type, details
+
+        # 2. DEFENSIVE GUARD - Cải thiện
+        def detect_guard_improved():
+            confidence = 0.0
+            details = []
+
+            if (9 in kp_dict and 10 in kp_dict and 5 in kp_dict and 6 in kp_dict):
+                left_wrist = kp_dict[9]
+                right_wrist = kp_dict[10]
+                left_shoulder = kp_dict[5]
+                right_shoulder = kp_dict[6]
+
+                avg_shoulder_y = (left_shoulder['y'] + right_shoulder['y']) / 2
+
+                # GIẢM YÊU CẦU - tay ở mức vai hoặc hơi cao hơn
+                hands_up = (left_wrist['y'] <= avg_shoulder_y + height * 0.1 and
+                            right_wrist['y'] <= avg_shoulder_y + height * 0.1)
+
+                # TĂNG TOLERANCE cho khoảng cách tay
+                shoulder_center_x = (left_shoulder['x'] + right_shoulder['x']) / 2
+                hands_close = (abs(left_wrist['x'] - shoulder_center_x) < width * 0.25 and
+                               abs(right_wrist['x'] - shoulder_center_x) < width * 0.25)
+
+                if hands_up and hands_close:
+                    confidence = 0.8
+                    details.append("Defensive guard position with hands up")
+                elif hands_up:  # Chỉ cần tay nâng lên
+                    confidence = 0.6
+                    details.append("Hands elevated in fighting position")
+
+            return confidence, details
+
+        # 3. AGGRESSIVE STANCE - Mới thêm
+        def detect_aggressive_stance():
+            confidence = 0.0
+            details = []
+
+            if (9 in kp_dict and 10 in kp_dict and 5 in kp_dict and 6 in kp_dict and
+                    11 in kp_dict and 12 in kp_dict):
+
+                left_wrist = kp_dict[9]
+                right_wrist = kp_dict[10]
+                left_shoulder = kp_dict[5]
+                right_shoulder = kp_dict[6]
+                left_hip = kp_dict[11]
+                right_hip = kp_dict[12]
+
+                # Kiểm tra tư thế tấn công (1 tay xa, 1 tay gần)
+                shoulder_center_x = (left_shoulder['x'] + right_shoulder['x']) / 2
+                left_distance = abs(left_wrist['x'] - shoulder_center_x)
+                right_distance = abs(right_wrist['x'] - shoulder_center_x)
+
+                # Một tay xa, một tay gần
+                distance_diff = abs(left_distance - right_distance)
+
+                if distance_diff > width * 0.15:  # Chênh lệch đáng kể
+                    # Kiểm tra cơ thể có nghiêng về phía trước không
+                    avg_shoulder_y = (left_shoulder['y'] + right_shoulder['y']) / 2
+                    avg_hip_y = (left_hip['y'] + right_hip['y']) / 2
+
+                    forward_lean = avg_shoulder_y < avg_hip_y - height * 0.05
+
+                    if forward_lean:
+                        confidence = 0.75
+                        details.append("Aggressive forward stance detected")
+                    else:
+                        confidence = 0.65
+                        details.append("Asymmetric hand position suggesting attack")
+
+            return confidence, details
+
+        # Chạy tất cả detections
+        punch_conf, punch_type, punch_details = detect_punching_improved()
+        guard_conf, guard_details = detect_guard_improved()
+        aggressive_conf, aggressive_details = detect_aggressive_stance()
+        # THÊM: Fallback detection cho boxing
+        if max(punch_conf, guard_conf, aggressive_conf) == 0:
+            print("DEBUG BOXING - Trying fallback detection")
+
+            # Fallback 1: Chỉ cần có tay nâng lên
+            if (9 in kp_dict and 10 in kp_dict and 5 in kp_dict and 6 in kp_dict):
+                left_wrist = kp_dict[9]
+                right_wrist = kp_dict[10]
+                left_shoulder = kp_dict[5]
+                right_shoulder = kp_dict[6]
+
+                avg_shoulder_y = (left_shoulder['y'] + right_shoulder['y']) / 2
+
+                # Chỉ cần một tay ngang hoặc cao hơn vai
+                hands_elevated = (left_wrist['y'] <= avg_shoulder_y + height * 0.2 or
+                                  right_wrist['y'] <= avg_shoulder_y + height * 0.2)
+
+                if hands_elevated:
+                    punch_conf = 0.5
+                    punch_type = "boxing_stance"
+                    punch_details = ["Basic boxing position with elevated hands"]
+                    print("DEBUG BOXING - Fallback detection successful")
+
+        # Ưu tiên theo confidence
+        max_conf = max(punch_conf, guard_conf, aggressive_conf)
+
+        if max_conf == punch_conf and punch_conf > 0.4:  # Giảm ngưỡng từ 0.5 xuống 0.4
+            action_confidence = punch_conf
+            detected_actions.append({
+                'action': punch_type,
+                'confidence': punch_conf,
+                'details': '; '.join(punch_details),
+                'body_part': 'arms'
+            })
+        elif max_conf == aggressive_conf and aggressive_conf > 0.4:  # Giảm ngưỡng
+            action_confidence = aggressive_conf
+            detected_actions.append({
+                'action': 'aggressive_stance',
+                'confidence': aggressive_conf,
+                'details': '; '.join(aggressive_details),
+                'body_part': 'full_body'
+            })
+        elif max_conf == guard_conf and guard_conf > 0.4:  # Giảm ngưỡng
+            action_confidence = guard_conf
+            detected_actions.append({
+                'action': 'defensive_guard',
+                'confidence': guard_conf,
+                'details': '; '.join(guard_details),
+                'body_part': 'both_arms'
+            })
+
+        # CẬP NHẬT THÔNG TIN VỀ LOẠI THỂ THAO NẾU PHÁT HIỆN BOXING
+        if action_confidence > 0.7:
+            detected_action = detected_actions[-1]['action'] if detected_actions else None
+            if detected_action in ['straight_punch', 'left_hook', 'right_hook', 'uppercut', 'body_shot', 'defensive_guard']:
+                detected_actions[-1]['detected_sport'] = 'boxing'
+                print(f"DEBUG - High confidence boxing action detected: {detected_action} - should override sport type")
+
+
+    # ==================== CHẠY/ĐIỀN KINH (RUNNING/TRACK) ====================
+    elif (any(sport in sport_lower for sport in ['running', 'track', 'sprint', 'marathon']) and
+          any(sport in allowed_sports for sport in ['running', 'track'])):
+        action_confidence = 0.0
+
+        # 1. SPRINTING - Chân nâng cao, tay vung mạnh
+        if (13 in kp_dict and 14 in kp_dict and 15 in kp_dict and 16 in kp_dict and
+                9 in kp_dict and 10 in kp_dict):
+
+            left_knee = kp_dict[13]
+            right_knee = kp_dict[14]
+            left_ankle = kp_dict[15]
+            right_ankle = kp_dict[16]
+            left_wrist = kp_dict[9]
+            right_wrist = kp_dict[10]
+
+            # Kiểm tra chân nâng cao
+            ground_level = height * 0.9
+            high_knee = (left_knee['y'] < ground_level * 0.7 or right_knee['y'] < ground_level * 0.7)
+
+            # Kiểm tra tay vung (chênh lệch độ cao giữa hai tay)
+            arm_swing = abs(left_wrist['y'] - right_wrist['y']) > height * 0.1
+
+            if high_knee and arm_swing:
+                action_confidence = 0.85
+                detected_actions.append({
+                    'action': 'sprinting',
+                    'confidence': action_confidence,
+                    'details': 'High knee lift with dynamic arm swing',
+                    'body_part': 'full_body'
+                })
+            elif high_knee:
+                action_confidence = 0.7
+                detected_actions.append({
+                    'action': 'running',
+                    'confidence': 0.7,
+                    'details': 'Elevated knee position indicating running motion',
+                    'body_part': 'legs'
+                })
+
+    # ==================== CẦU LÔNG (BADMINTON) ====================
+    elif 'badminton' in sport_lower and 'badminton' in allowed_sports:
+        action_confidence = 0.0
+
+        # 1. SMASH - Tay nâng cao, chuẩn bị đập mạnh
+        def detect_smash():
+            confidence = 0.0
+            details = []
+
+            if (9 in kp_dict and 10 in kp_dict and 7 in kp_dict and 8 in kp_dict and
+                    5 in kp_dict and 6 in kp_dict):
+
+                left_wrist = kp_dict[9]
+                right_wrist = kp_dict[10]
+                left_elbow = kp_dict[7]
+                right_elbow = kp_dict[8]
+                left_shoulder = kp_dict[5]
+                right_shoulder = kp_dict[6]
+
+                avg_shoulder_y = (left_shoulder['y'] + right_shoulder['y']) / 2
+
+                # Một tay nâng rất cao (cầm vợt)
+                left_very_high = left_wrist['y'] < avg_shoulder_y - height * 0.2
+                right_very_high = right_wrist['y'] < avg_shoulder_y - height * 0.2
+
+                if left_very_high or right_very_high:
+                    smashing_hand = "left" if left_very_high else "right"
+
+                    # Kiểm tra góc khuỷu tay (smash prep có góc đặc trưng)
+                    if smashing_hand == "left":
+                        elbow_angle = calculate_angle(left_shoulder, left_elbow, left_wrist)
+                    else:
+                        elbow_angle = calculate_angle(right_shoulder, right_elbow, right_wrist)
+
+                    if 90 <= elbow_angle <= 150:
+                        confidence = 0.85
+                        details.append(f"{smashing_hand} hand in smash position (angle: {elbow_angle:.1f}°)")
+                    else:
+                        confidence = 0.7
+                        details.append(f"{smashing_hand} hand raised for overhead shot")
+
+            return confidence, details
+
+        # 2. CLEAR/DROP - Tay vung từ sau ra trước
+        def detect_clear_drop():
+            confidence = 0.0
+            details = []
+            shot_type = "unknown"
+
+            if (9 in kp_dict and 10 in kp_dict and 5 in kp_dict and 6 in kp_dict):
+                left_wrist = kp_dict[9]
+                right_wrist = kp_dict[10]
+                left_shoulder = kp_dict[5]
+                right_shoulder = kp_dict[6]
+
+                # Kiểm tra tay có duỗi ra không (follow-through)
+                shoulder_center_x = (left_shoulder['x'] + right_shoulder['x']) / 2
+                left_extended = abs(left_wrist['x'] - shoulder_center_x) > width * 0.15
+                right_extended = abs(right_wrist['x'] - shoulder_center_x) > width * 0.15
+
+                if left_extended or right_extended:
+                    hitting_hand = "left" if left_extended else "right"
+
+                    # Xác định shot type dựa trên độ cao
+                    if hitting_hand == "left":
+                        wrist_height = left_wrist['y']
+                        shoulder_height = left_shoulder['y']
+                    else:
+                        wrist_height = right_wrist['y']
+                        shoulder_height = right_shoulder['y']
+
+                    if wrist_height < shoulder_height:
+                        shot_type = "clear_shot"
+                        confidence = 0.75
+                        details.append(f"{hitting_hand} hand clear shot motion")
+                    else:
+                        shot_type = "drop_shot"
+                        confidence = 0.7
+                        details.append(f"{hitting_hand} hand drop shot motion")
+
+            return confidence, shot_type, details
+
+        # 3. DEFENSIVE POSITION - Tay thấp, sẵn sàng phòng thủ
+        def detect_defensive():
+            confidence = 0.0
+            details = []
+
+            if (9 in kp_dict and 10 in kp_dict and 11 in kp_dict and 13 in kp_dict and 14 in kp_dict):
+                left_wrist = kp_dict[9]
+                right_wrist = kp_dict[10]
+                hip = kp_dict[11]
+                left_knee = kp_dict[13]
+                right_knee = kp_dict[14]
+
+                # Tay ở mức thấp (ready position)
+                hands_low = (left_wrist['y'] > hip['y'] - height * 0.1 and
+                             right_wrist['y'] > hip['y'] - height * 0.1)
+
+                # Chân hơi gấp (athletic stance)
+                left_knee_bent = calculate_angle(hip, left_knee, kp_dict[15]) < 160 if 15 in kp_dict else False
+                right_knee_bent = calculate_angle(hip, right_knee, kp_dict[16]) < 160 if 16 in kp_dict else False
+
+                if hands_low and (left_knee_bent or right_knee_bent):
+                    confidence = 0.7
+                    details.append("Low ready position for defensive play")
+
+            return confidence, details
+
+        # Chạy detections
+        smash_conf, smash_details = detect_smash()
+        clear_conf, clear_type, clear_details = detect_clear_drop()
+        def_conf, def_details = detect_defensive()
+
+        # Ưu tiên
+        if smash_conf > 0.6:
+            action_confidence = smash_conf
+            detected_actions.append({
+                'action': 'badminton_smash',
+                'confidence': smash_conf,
+                'details': '; '.join(smash_details),
+                'body_part': 'dominant_arm'
+            })
+        elif clear_conf > 0.6:
+            action_confidence = clear_conf
+            detected_actions.append({
+                'action': clear_type,
+                'confidence': clear_conf,
+                'details': '; '.join(clear_details),
+                'body_part': 'dominant_arm'
+            })
+        elif def_conf > 0.5:
+            action_confidence = def_conf
+            detected_actions.append({
+                'action': 'defensive_ready',
+                'confidence': def_conf,
+                'details': '; '.join(def_details),
+                'body_part': 'full_body'
+            })
+
+    # ==================== GOLF ====================
+    elif 'golf' in sport_lower and 'golf' in allowed_sports:
+        action_confidence = 0.0
+
+        # 1. BACKSWING - Tay vung lên cao về phía sau
+        def detect_backswing():
+            confidence = 0.0
+            details = []
+
+            if (9 in kp_dict and 10 in kp_dict and 5 in kp_dict and 6 in kp_dict):
+                left_wrist = kp_dict[9]
+                right_wrist = kp_dict[10]
+                left_shoulder = kp_dict[5]
+                right_shoulder = kp_dict[6]
+
+                avg_shoulder_y = (left_shoulder['y'] + right_shoulder['y']) / 2
+                shoulder_center_x = (left_shoulder['x'] + right_shoulder['x']) / 2
+
+                # Cả hai tay nâng cao và hơi lệch về một bên
+                hands_high = (left_wrist['y'] < avg_shoulder_y and right_wrist['y'] < avg_shoulder_y)
+
+                # Kiểm tra swing arc (tay lệch sang một bên)
+                hands_offset = abs(((left_wrist['x'] + right_wrist['x']) / 2) - shoulder_center_x)
+                swing_arc = hands_offset > width * 0.1
+
+                if hands_high and swing_arc:
+                    confidence = 0.8
+                    swing_side = "right" if ((left_wrist['x'] + right_wrist['x']) / 2) > shoulder_center_x else "left"
+                    details.append(f"Backswing motion toward {swing_side} side")
+
+            return confidence, details
+
+        # 2. DOWNSWING/IMPACT - Tay vung xuống
+        def detect_downswing():
+            confidence = 0.0
+            details = []
+
+            if (9 in kp_dict and 10 in kp_dict and 11 in kp_dict):
+                left_wrist = kp_dict[9]
+                right_wrist = kp_dict[10]
+                hip = kp_dict[11]
+
+                # Tay ở mức hông hoặc thấp hơn (impact position)
+                hands_at_impact = (left_wrist['y'] >= hip['y'] - height * 0.1 and
+                                   right_wrist['y'] >= hip['y'] - height * 0.1)
+
+                # Hai tay gần nhau (grip)
+                hands_together = abs(left_wrist['x'] - right_wrist['x']) < width * 0.08
+
+                if hands_at_impact and hands_together:
+                    confidence = 0.75
+                    details.append("Impact position with hands at ball level")
+
+            return confidence, details
+
+        # 3. FOLLOW THROUGH - Tay vung qua bên kia
+        def detect_follow_through():
+            confidence = 0.0
+            details = []
+
+            if (9 in kp_dict and 10 in kp_dict and 5 in kp_dict and 6 in kp_dict):
+                left_wrist = kp_dict[9]
+                right_wrist = kp_dict[10]
+                left_shoulder = kp_dict[5]
+                right_shoulder = kp_dict[6]
+
+                avg_shoulder_y = (left_shoulder['y'] + right_shoulder['y']) / 2
+                shoulder_center_x = (left_shoulder['x'] + right_shoulder['x']) / 2
+
+                # Tay cao và ở phía đối diện với backswing
+                hands_high = (left_wrist['y'] < avg_shoulder_y and right_wrist['y'] < avg_shoulder_y)
+
+                # Kiểm tra follow-through direction
+                hands_center_x = (left_wrist['x'] + right_wrist['x']) / 2
+                follow_through = abs(hands_center_x - shoulder_center_x) > width * 0.12
+
+                if hands_high and follow_through:
+                    confidence = 0.75
+                    follow_side = "left" if hands_center_x < shoulder_center_x else "right"
+                    details.append(f"Follow-through completion toward {follow_side}")
+
+            return confidence, details
+
+        # 4. PUTTING STANCE - Tay thấp, tư thế cúi
+        def detect_putting():
+            confidence = 0.0
+            details = []
+
+            if (9 in kp_dict and 10 in kp_dict and 5 in kp_dict and 11 in kp_dict):
+                left_wrist = kp_dict[9]
+                right_wrist = kp_dict[10]
+                shoulder = kp_dict[5]
+                hip = kp_dict[11]
+
+                # Tay thấp (putting grip)
+                hands_low = (left_wrist['y'] > hip['y'] and right_wrist['y'] > hip['y'])
+
+                # Cơ thể cúi về phía trước
+                forward_lean = shoulder['y'] < hip['y'] - height * 0.05
+
+                # Hai tay gần nhau và thẳng xuống
+                hands_together = abs(left_wrist['x'] - right_wrist['x']) < width * 0.06
+
+                if hands_low and forward_lean and hands_together:
+                    confidence = 0.8
+                    details.append("Putting stance with forward lean")
+
+            return confidence, details
+
+        # Chạy detections
+        back_conf, back_details = detect_backswing()
+        down_conf, down_details = detect_downswing()
+        follow_conf, follow_details = detect_follow_through()
+        putt_conf, putt_details = detect_putting()
+
+        # Ưu tiên theo confidence
+        max_conf = max(back_conf, down_conf, follow_conf, putt_conf)
+
+        if max_conf == back_conf and back_conf > 0.6:
+            action_confidence = back_conf
+            detected_actions.append({
+                'action': 'golf_backswing',
+                'confidence': back_conf,
+                'details': '; '.join(back_details),
+                'body_part': 'both_arms'
+            })
+        elif max_conf == down_conf and down_conf > 0.6:
+            action_confidence = down_conf
+            detected_actions.append({
+                'action': 'golf_impact',
+                'confidence': down_conf,
+                'details': '; '.join(down_details),
+                'body_part': 'both_arms'
+            })
+        elif max_conf == follow_conf and follow_conf > 0.6:
+            action_confidence = follow_conf
+            detected_actions.append({
+                'action': 'golf_follow_through',
+                'confidence': follow_conf,
+                'details': '; '.join(follow_details),
+                'body_part': 'both_arms'
+            })
+        elif max_conf == putt_conf and putt_conf > 0.6:
+            action_confidence = putt_conf
+            detected_actions.append({
+                'action': 'putting',
+                'confidence': putt_conf,
+                'details': '; '.join(putt_details),
+                'body_part': 'both_arms'
+            })
+
+
+    # ==================== BƠI LỘI (SWIMMING) ====================
+    elif ('swimming' in sport_lower or 'swimming' in allowed_sports or is_swimming_environment):
+        print(f"DEBUG SWIMMING - Entering swimming detection")
+        print(
+            f"sport_lower: {sport_lower}, allowed_sports: {allowed_sports}, is_swimming_environment: {is_swimming_environment}")
+        action_confidence = 0.0
+
+        # FREESTYLE STROKE - Một tay duỗi về phía trước
+        if (9 in kp_dict and 10 in kp_dict and 5 in kp_dict and 6 in kp_dict):
+            left_wrist = kp_dict[9]
+            right_wrist = kp_dict[10]
+            left_shoulder = kp_dict[5]
+            right_shoulder = kp_dict[6]
+
+            # Kiểm tra một tay duỗi xa
+            left_extended = abs(left_wrist['x'] - left_shoulder['x']) > width * 0.2
+            right_extended = abs(right_wrist['x'] - right_shoulder['x']) > width * 0.2
+
+            if left_extended or right_extended:
+                action_confidence = 0.75
+                stroke_arm = "left" if left_extended else "right"
+                detected_actions.append({
+                    'action': 'freestyle_stroke',
+                    'confidence': action_confidence,
+                    'details': f'{stroke_arm.title()} arm extended for freestyle stroke',
+                    'body_part': f'{stroke_arm}_arm'
+                })
+                print(f"SWIMMING DEBUG - Detected freestyle stroke with {stroke_arm} arm")
+
+        # BREASTSTROKE - Cả hai tay ra ngoài
+        if not detected_actions and (9 in kp_dict and 10 in kp_dict and 5 in kp_dict and 6 in kp_dict):
+            left_wrist = kp_dict[9]
+            right_wrist = kp_dict[10]
+            left_shoulder = kp_dict[5]
+            right_shoulder = kp_dict[6]
+
+            # Cả hai tay đều ra ngoài (breaststroke)
+            left_out = abs(left_wrist['x'] - left_shoulder['x']) > width * 0.15
+            right_out = abs(right_wrist['x'] - right_shoulder['x']) > width * 0.15
+
+            if left_out and right_out:
+                action_confidence = 0.7
+                detected_actions.append({
+                    'action': 'breaststroke',
+                    'confidence': action_confidence,
+                    'details': 'Both arms extended for breaststroke motion',
+                    'body_part': 'both_arms'
+                })
+                print(f"SWIMMING DEBUG - Detected breaststroke")
+
+        # BACKSTROKE - Một tay lên cao
+        if not detected_actions and (9 in kp_dict and 10 in kp_dict and 5 in kp_dict and 6 in kp_dict):
+            left_wrist = kp_dict[9]
+            right_wrist = kp_dict[10]
+            left_shoulder = kp_dict[5]
+            right_shoulder = kp_dict[6]
+
+            avg_shoulder_y = (left_shoulder['y'] + right_shoulder['y']) / 2
+
+            # Một tay nâng cao (backstroke)
+            left_high = left_wrist['y'] < avg_shoulder_y - height * 0.1
+            right_high = right_wrist['y'] < avg_shoulder_y - height * 0.1
+
+            if left_high or right_high:
+                action_confidence = 0.65
+                stroke_arm = "left" if left_high else "right"
+                detected_actions.append({
+                    'action': 'backstroke',
+                    'confidence': action_confidence,
+                    'details': f'{stroke_arm.title()} arm raised for backstroke motion',
+                    'body_part': f'{stroke_arm}_arm'
+                })
+                print(f"SWIMMING DEBUG - Detected backstroke with {stroke_arm} arm")
+
+        # DIVING/STARTING POSITION - Cơ thể cúi về phía trước
+        if not detected_actions and (5 in kp_dict and 11 in kp_dict):
+            shoulder = kp_dict[5]
+            hip = kp_dict[11]
+
+            # Cơ thể nghiêng về phía trước (diving stance)
+            forward_lean = shoulder['y'] < hip['y'] - height * 0.05
+
+            if forward_lean:
+                action_confidence = 0.6
+                detected_actions.append({
+                    'action': 'diving_start',
+                    'confidence': action_confidence,
+                    'details': 'Forward lean indicating diving start position',
+                    'body_part': 'full_body'
+                })
+                print(f"SWIMMING DEBUG - Detected diving start position")
+
+        # FALLBACK cho swimming environment
+        if not detected_actions:
+            action_confidence = 0.4
+            detected_actions.append({
+                'action': 'swimming_position',
+                'confidence': action_confidence,
+                'details': 'General swimming position in pool environment',
+                'body_part': 'full_body'
+            })
+            print(f"SWIMMING DEBUG - Using fallback swimming position")
+
+    # FALLBACK DETECTION - Cho các trường hợp khó detect
+    if not detected_actions and len(kp_dict) >= 8:  # Có đủ keypoints nhưng không detect được action
+        # Phân tích tổng quát dựa trên body posture
+        fallback_confidence = 0.0
+        fallback_action = "unknown"
+        fallback_details = "General athletic posture detected"
+
+        if 5 in kp_dict and 6 in kp_dict and 11 in kp_dict and 12 in kp_dict:
+            shoulders = kp_dict[5], kp_dict[6]
+            hips = kp_dict[11], kp_dict[12]
+
+            # Athletic stance detection
+            shoulder_width = abs(shoulders[0]['x'] - shoulders[1]['x'])
+            hip_width = abs(hips[0]['x'] - hips[1]['x'])
+            stance_ratio = shoulder_width / hip_width if hip_width > 0 else 1.0
+
+            if 0.8 <= stance_ratio <= 1.2:  # Balanced athletic stance
+                fallback_confidence = 0.4
+                fallback_action = "athletic_stance"
+                fallback_details = "Balanced athletic position detected"
+
+                # Thêm sport-specific fallback
+                if 'soccer' in sport_lower or 'football' in sport_lower:
+                    fallback_action = "soccer_ready_position"
+                    fallback_details = "Ready position for soccer action"
+                elif 'volleyball' in sport_lower:
+                    fallback_action = "volleyball_ready_position"
+                    fallback_details = "Ready position for volleyball action"
+
+        if fallback_confidence > 0:
+            detected_actions.append({
+                'action': fallback_action,
+                'confidence': fallback_confidence,
+                'details': fallback_details,
+                'body_part': 'full_body'
+            })
+
+    # Tính confidence tổng thể
+    if detected_actions:
+        overall_confidence = max([action['confidence'] for action in detected_actions])
+    else:
+        overall_confidence = 0.0
+
+    # Thêm thông tin về body orientation vào kết quả
+    for action in detected_actions:
+        action['body_orientation'] = body_orientation
+
+    return {
+        'detected_actions': detected_actions,
+        'confidence': overall_confidence,
+        'body_orientation': body_orientation,
+        'keypoints_count': len(kp_dict),
+        'details': f'Analyzed {len(kp_dict)} keypoints for {sport_type} actions'
+    }
+
+def segment_main_subject(img, yolo_seg, main_subject_box):
+    results = yolo_seg(img)
     best_mask = None
     best_iou = 0
-
-    # Kiểm tra các kết quả
     for result in results:
         if hasattr(result, 'masks') and result.masks is not None:
             for i, mask in enumerate(result.masks.data):
-                # Lấy bbox tương ứng với mask
                 box = result.boxes.xyxy[i].cpu().numpy()
-
-                # Tính IoU giữa box của mask và main_subject_box
                 x1 = max(box[0], main_subject_box[0])
                 y1 = max(box[1], main_subject_box[1])
                 x2 = min(box[2], main_subject_box[2])
@@ -1798,30 +2722,24 @@ def segment_main_subject(img, yolo_seg, main_subject_box):
 
 
 def analyze_sports_composition(detections, analysis, img_data):
-    """Analyze the composition with sports-specific context"""
-
-    # Basic composition from existing analysis
     analysis["composition_analysis"] if "composition_analysis" in analysis else {}
-
-    # Phân tích môi trường thể thao
     depth_map = None
     if 'depth_map' in analysis:
         depth_map = analysis['depth_map']
 
     env_analysis = analyze_sports_environment(img_data, depth_map)
-
-    # Sports specific enhancements
     result = {
-        'sport_type': 'Running',
+        'sport_type': 'Unknown',
         'framing_quality': 'Unknown',
         'recommended_crop': None,
         'action_focus': 'Unknown'
     }
-
-    # MAPPING CHỈ CÁC ĐỐI TƯỢNG YOLO THỰC + CLIP BALL CLASSIFICATION
     sport_equipment = {
         # Đối tượng YOLO cơ bản
         'tennis racket': 'Tennis',
+        'boxing gloves': 'Boxing',
+        'golf club': 'Golf',
+        'badminton racket': 'Badminton',
         'baseball bat': 'Baseball',
         'baseball glove': 'Baseball',
         'skateboard': 'Skateboarding',
@@ -1870,11 +2788,161 @@ def analyze_sports_composition(detections, analysis, img_data):
             equipment_confidence = 0.7  # Độ tin cậy khi phát hiện từ dụng cụ
             break
 
-    # Quyết định cuối cùng về môn thể thao
-    if detected_sport and equipment_confidence > env_confidence:
+    # ==== MỚI: PHÂN TÍCH ACTION DETECTION ĐỂ SUY RA SPORT TYPE ====
+    detected_sport_from_action = None
+    action_confidence = 0.0
+
+    # Lấy action detection results từ analysis
+    if 'sports_analysis' in analysis and 'action_detection' in analysis['sports_analysis']:
+        action_data = analysis['sports_analysis']['action_detection']
+        detected_actions = action_data.get('detected_actions', [])
+
+        if detected_actions:
+            # Mapping từ action sang sport type
+            action_to_sport = {
+                # Boxing/Martial Arts actions
+                'straight_punch': 'Boxing',
+                'left_hook': 'Boxing',
+                'right_hook': 'Boxing',
+                'uppercut': 'Boxing',
+                'body_shot': 'Boxing',
+                'defensive_guard': 'Boxing',
+                'high_kick': 'Martial Arts',
+                'mid_kick': 'Martial Arts',
+
+                # Badminton actions
+                'badminton_smash': 'Badminton',
+                'clear_shot': 'Badminton',
+                'drop_shot': 'Badminton',
+                'defensive_ready': 'Badminton',
+
+                # Golf actions
+                'golf_backswing': 'Golf',
+                'golf_impact': 'Golf',
+                'golf_follow_through': 'Golf',
+                'putting': 'Golf',
+
+                # Soccer actions
+                'shooting': 'Soccer',
+                'pre_kick_stance': 'Soccer',
+                'approach_run': 'Soccer',
+                'dribbling': 'Soccer',
+
+                # Basketball actions (từ code cũ)
+                # 'shooting' đã có ở Soccer, cần phân biệt context
+
+                # Volleyball actions
+                'classic_spike': 'Volleyball',
+                'power_spike_prep': 'Volleyball',
+                'double_hand_spike': 'Volleyball',
+                'quick_attack': 'Volleyball',
+                'double_block': 'Volleyball',
+                'single_block': 'Volleyball',
+                'soft_block': 'Volleyball',
+                'setting': 'Volleyball',
+                'digging': 'Volleyball',
+
+                # Tennis actions
+                'serving': 'Tennis',
+                'forehand': 'Tennis',
+                'backhand': 'Tennis',
+
+                # Running/Track actions
+                'sprinting': 'Track and Field',
+                'running': 'Running',
+
+                # Swimming actions
+                'freestyle_stroke': 'Swimming'
+            }
+
+            # Tìm action có confidence cao nhất
+            best_action = max(detected_actions, key=lambda x: x['confidence'])
+            action_name = best_action['action']
+
+            if action_name in action_to_sport and best_action['confidence'] > 0.6:
+                detected_sport_from_action = action_to_sport[action_name]
+                action_confidence = best_action['confidence']
+                print(
+                    f"Sport detected from action: {action_name} -> {detected_sport_from_action} (confidence: {action_confidence:.2f})")
+
+                # XỬ LÝ ĐẶC BIỆT: 'shooting' có thể là Soccer hoặc Basketball
+                if action_name == 'shooting':
+                    # Kiểm tra context để phân biệt
+                    if 'soccer ball' in detections.get('classes', []):
+                        detected_sport_from_action = 'Soccer'
+                    elif 'basketball' in detections.get('classes', []):
+                        detected_sport_from_action = 'Basketball'
+                    elif 'sports ball' in detections.get('classes', []):
+                        # Dựa vào environment để đoán
+                        if env_analysis.get('surface_type') == 'grass':
+                            detected_sport_from_action = 'Soccer'
+                        elif env_analysis.get('surface_type') == 'court':
+                            detected_sport_from_action = 'Basketball'
+                        else:
+                            detected_sport_from_action = 'Soccer'  # Default
+    # PRIORITY ƯU TIÊN MỚI: ACTION -> EQUIPMENT -> ENVIRONMENT
+    # (để action detection có độ tin cậy cao được ưu tiên)
+    decision_log = []
+
+    # PRIORITY 0: Kiểm tra boxing action từ action detection
+    if 'sports_analysis' in analysis and 'action_detection' in analysis['sports_analysis'] and \
+            analysis['sports_analysis']['action_detection'].get('detected_actions'):
+        for action in analysis['sports_analysis']['action_detection']['detected_actions']:
+            if action.get('confidence', 0) > 0.7 and action.get('detected_sport') == 'boxing':
+                result['sport_type'] = 'Boxing'
+                decision_log.append(
+                    f"High-confidence boxing action detection: {action['action']} ({action['confidence']:.2f})")
+                break
+
+    # PRIORITY 1: Action detection có confidence cao (ưu tiên nhất)
+    if detected_sport_from_action and action_confidence > 0.7:
+        result['sport_type'] = detected_sport_from_action
+        decision_log.append(f"High-confidence action detection: {detected_sport_from_action} ({action_confidence:.2f})")
+
+    # PRIORITY 2: Equipment detection
+    elif detected_sport and equipment_confidence > 0.6:
         result['sport_type'] = detected_sport
-    elif detected_sport_from_env:
+        decision_log.append(f"Equipment detection: {detected_sport} ({equipment_confidence:.2f})")
+
+    # PRIORITY 3: Action detection với confidence trung bình
+    elif detected_sport_from_action and action_confidence > 0.6:
+        result['sport_type'] = detected_sport_from_action
+        decision_log.append(f"Action detection: {detected_sport_from_action} ({action_confidence:.2f})")
+
+    # PRIORITY 4: Environment detection (đặc biệt cho swimming)
+    elif detected_sport_from_env and env_confidence > 0.8:
         result['sport_type'] = detected_sport_from_env
+        decision_log.append(f"Environment detection: {detected_sport_from_env} ({env_confidence:.2f})")
+
+    # PRIORITY 5: Action detection với confidence thấp hơn
+    elif detected_sport_from_action and action_confidence > 0.5:
+        result['sport_type'] = detected_sport_from_action
+        decision_log.append(
+            f"Medium-confidence action detection: {detected_sport_from_action} ({action_confidence:.2f})")
+
+    # FALLBACKS
+    elif detected_sport and equipment_confidence > 0.4:  # Equipment fallback
+        result['sport_type'] = detected_sport
+        decision_log.append(f"Equipment detection (fallback): {detected_sport} ({equipment_confidence:.2f})")
+    elif detected_sport_from_env and env_confidence > 0.5:  # Environment fallback
+        result['sport_type'] = detected_sport_from_env
+        decision_log.append(f"Environment detection (fallback): {detected_sport_from_env} ({env_confidence:.2f})")
+    elif detected_sport_from_action and action_confidence > 0.4:  # Action fallback
+        result['sport_type'] = detected_sport_from_action
+        decision_log.append(f"Action detection (fallback): {detected_sport_from_action} ({action_confidence:.2f})")
+    else:
+        result['sport_type'] = 'Running'  # Default cuối cùng
+        decision_log.append("Default: Running")
+
+    print(f"Sport type decision: {' -> '.join(decision_log)}")
+
+    # Debug equipment vs action relationship
+    if detected_sport:
+        print(f"Equipment detected: {detected_sport} (confidence: {equipment_confidence:.2f})")
+    if detected_sport_from_action:
+        print(f"Action-based sport: {detected_sport_from_action} (confidence: {action_confidence:.2f})")
+    if detected_sport_from_env:
+        print(f"Environment-based sport: {detected_sport_from_env} (confidence: {env_confidence:.2f})")
 
     # Lưu thông tin phân tích môi trường
     result['environment_analysis'] = env_analysis
@@ -3636,17 +4704,28 @@ def visualize_sports_results(img_data, detections, depth_map, sports_analysis, a
 
             # Vẽ skeleton
             for kp1_id, kp2_id in skeleton:
+                # CHỈ kết nối các keypoint có confidence đủ cao
                 if kp1_id in keypoints and kp2_id in keypoints:
                     pt1 = keypoints[kp1_id]
                     pt2 = keypoints[kp2_id]
 
-                    # Kiểm tra khoảng cách để tránh vẽ các đường quá dài
+                    # Kiểm tra khoảng cách để tránh vẽ các đường quá dài - GIẢM NGƯỠNG XUỐNG
                     distance = np.sqrt(((pt1[0] - pt2[0]) ** 2) + ((pt1[1] - pt2[1]) ** 2))
-                    # Khoảng cách tối đa hợp lý giữa các keypoint (có thể điều chỉnh)
-                    max_distance = width * 0.5  # 50% chiều rộng ảnh
+                    # Khoảng cách tối đa hợp lý giữa các keypoint (GIẢM XUỐNG 30%)
+                    max_distance = width * 0.3  # Giảm từ 50% xuống 30% chiều rộng ảnh
 
-                    if distance > max_distance:
-                        continue  # Bỏ qua các skeleton quá dài
+                    # THÊM: Kiểm tra confidence của cả hai điểm trong dict ban đầu
+                    kp1_conf = 0
+                    kp2_conf = 0
+                    for kp in person['keypoints']:
+                        if kp['id'] == kp1_id:
+                            kp1_conf = kp['confidence']
+                        if kp['id'] == kp2_id:
+                            kp2_conf = kp['confidence']
+
+                    # CHỈ vẽ khi cả 2 điểm đều có confidence cao
+                    if kp1_conf < 0.2 or kp2_conf < 0.2 or distance > max_distance:
+                        continue  # Bỏ qua các skeleton khi có điểm kém tin cậy hoặc quá dài
 
                     # Sử dụng màu khác nhau cho các phần khác nhau của cơ thể
                     if (kp1_id <= 4 and kp2_id <= 4):  # Phần đầu
@@ -3659,6 +4738,36 @@ def visualize_sports_results(img_data, detections, depth_map, sports_analysis, a
                     # Vẽ đường với độ dày lớn hơn
                     cv2.line(pose_viz, pt1, pt2, (0, 0, 0), 5)  # Đường viền đen
                     cv2.line(pose_viz, pt1, pt2, line_color, 3)  # Đường màu
+                    # HIỂN THỊ ACTION DETECTION
+                    if 'action_detection' in sports_analysis and sports_analysis['action_detection'].get(
+                            'detected_actions'):
+                        actions = sports_analysis['action_detection']['detected_actions']
+                        y_offset = 30
+
+                        # Hiển thị tiêu đề
+                        cv2.putText(pose_viz, "DETECTED ACTIONS:", (10, y_offset),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                        y_offset += 25
+
+                        # Hiển thị từng action
+                        for i, action in enumerate(actions[:3]):  # Hiển thị tối đa 3 actions
+                            action_text = f"{action['action'].upper()}: {action['confidence']:.2f}"
+                            color = (0, 255, 255) if action['confidence'] > 0.8 else (0, 255, 0)
+
+                            cv2.putText(pose_viz, action_text, (10, y_offset),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                            y_offset += 20
+
+                            # Hiển thị chi tiết ngắn gọn
+                            if len(action['details']) < 50:
+                                cv2.putText(pose_viz, action['details'], (10, y_offset),
+                                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
+                                y_offset += 15
+
+                        # Hiển thị body orientation
+                        orientation = sports_analysis['action_detection'].get('body_orientation', 'unknown')
+                        cv2.putText(pose_viz, f"View: {orientation}", (10, y_offset + 10),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 0), 2)
     else:
         print("Không tìm thấy dữ liệu pose_analysis hoặc cấu trúc dữ liệu không đúng")
         print(
@@ -3888,6 +4997,12 @@ def visualize_sports_results(img_data, detections, depth_map, sports_analysis, a
     if "sport_type" in composition_analysis:
         print(f"\nSport type: {composition_analysis['sport_type']}")
 
+        # Hiển thị logic detection
+        if 'action_detection' in sports_analysis and sports_analysis['action_detection'].get('detected_actions'):
+            best_action = max(sports_analysis['action_detection']['detected_actions'],
+                            key=lambda x: x['confidence'])
+            print(f"  -> Influenced by detected action: {best_action['action']} ({best_action['confidence']:.2f})")
+
         # Thêm thông tin về môi trường nếu có
         if 'environment_analysis' in composition_analysis:
             env = composition_analysis['environment_analysis']
@@ -3943,6 +5058,22 @@ def visualize_sports_results(img_data, detections, depth_map, sports_analysis, a
                 details = subject['sharpness_details']
                 print(f"   - Laplacian Variance: {details['laplacian_var']:.2f}")
                 print(f"   - Sobel Mean: {details['sobel_mean']:.2f}")
+
+    # HIỂN THỊ KẾT QUẢ ACTION DETECTION
+    if 'action_detection' in sports_analysis and sports_analysis['action_detection'].get('detected_actions'):
+        print("\nSports Action Detection:")
+        action_data = sports_analysis['action_detection']
+        print(f"- Body orientation: {action_data.get('body_orientation', 'unknown')}")
+        print(f"- Overall confidence: {action_data.get('confidence', 0):.2f}")
+        print(f"- Keypoints analyzed: {action_data.get('keypoints_count', 0)}")
+
+        for i, action in enumerate(action_data['detected_actions']):
+            print(f"  {i + 1}. {action['action'].upper()} ({action['confidence']:.2f})")
+            print(f"     - Body part: {action['body_part']}")
+            print(f"     - Details: {action['details']}")
+            print(f"     - View angle: {action['body_orientation']}")
+    else:
+        print("\nSports Action Detection: No specific actions detected")
 
     # HIỂN THỊ PHÂN TÍCH BIỂU CẢM CẢI TIẾN
     if facial_analysis and facial_analysis.get('has_faces', False):
@@ -4032,16 +5163,9 @@ def visualize_sports_results(img_data, detections, depth_map, sports_analysis, a
             f.write("\nImage Caption:\n")
             f.write(caption + "\n")
 
+
 def analyze_sports_image(file_path):
-    """
-    Main function to analyze sports images with enhanced pose detection
-    
-    Args:
-        file_path: Path to the image file
-        
-    Returns:
-        Dictionary containing complete analysis results
-    """
+    """Main function to analyze sports images"""
     t_start = time.time()
 
     # Load models
@@ -4070,24 +5194,21 @@ def analyze_sports_image(file_path):
     print("Analyzing action quality...")
     action_analysis = analyze_action_quality(detections, img_data)
 
-    # Step 5: Sports composition analysis
+    # Step 5: Sports composition analysis (QUAN TRỌNG: Phải sau action detection)
     print("Analyzing composition...")
     composition_analysis = analyze_sports_composition(detections, {
-        'sports_analysis': sports_analysis,
+        'sports_analysis': sports_analysis,  # Bao gồm action_detection results
         'depth_map': depth_map
     }, img_data)
 
-    # Step 6: Enhanced facial expression analysis
+    # Step 6: Facial expression analysis với phiên bản nâng cao
     print("Starting advanced facial expression analysis...")
     try:
         facial_analysis = analyze_facial_expression_advanced(
             detections,
             img_data,
             depth_map=depth_map,
-            sports_analysis={
-                'sports_analysis': sports_analysis,
-                'composition_analysis': composition_analysis
-            }
+            sports_analysis={'sports_analysis': sports_analysis, 'composition_analysis': composition_analysis}
         )
         print("Advanced facial expression analysis successful:", facial_analysis.get('has_faces', False))
     except Exception as e:
@@ -4096,1433 +5217,71 @@ def analyze_sports_image(file_path):
         traceback.print_exc()
         facial_analysis = {'has_faces': False, 'error': str(e)}
 
-    img_data['detections'] = detections
-    # Step 6.5: Enhanced pose detection with sport context
-    print("Detecting and analyzing human poses...")
-    pose_results = detect_human_pose(
-        img_data,
-        conf_threshold=0.15,
-        main_subject_box=sports_analysis.get('key_subjects', [{}])[0].get('box'),
-        sport_type=composition_analysis.get('sport_type')
+    # Step 6.5: THÊM PHÁT HIỆN POSE
+    print("Detecting human poses...")
+    pose_results = detect_human_pose(img_data, conf_threshold=0.15)
+    # Cập nhật sports_analysis với pose_results
+    sports_analysis['pose_analysis'] = pose_results
+    print(f"DEBUG B - sports_analysis sau khi gán pose: {sports_analysis.keys()}")
+
+    # Step 6.6: PHÁT HIỆN HÀNH ĐỘNG THỂ THAO VỚI EQUIPMENT FILTERING
+    print("Detecting sports actions with equipment filtering...")
+    sport_type = composition_analysis.get('sport_type', 'Unknown')
+
+    # Lấy equipment đã detect
+    detected_equipment = action_analysis.get('equipment_types', [])
+
+    # Lấy environment sport analysis
+    environment_sport = None
+    if 'environment_analysis' in composition_analysis and 'sport_probabilities' in composition_analysis[
+        'environment_analysis']:
+        env_sports = composition_analysis['environment_analysis']['sport_probabilities']
+        if env_sports:
+            environment_sport = max(env_sports.items(), key=lambda x: x[1])[0]
+
+    action_detection_results = detect_sports_actions(
+        pose_results,
+        sport_type,
+        img_data['resized_array'].shape,
+        detected_equipment=detected_equipment,
+        environment_sport=environment_sport
     )
 
-    
-    # Update sports_analysis with pose results
-    sports_analysis['pose_analysis'] = pose_results
+    # Cập nhật sports_analysis với action detection
+    sports_analysis['action_detection'] = action_detection_results
+    print(f"Detected actions: {[action['action'] for action in action_detection_results.get('detected_actions', [])]}")
+    if action_detection_results.get('detected_actions'):
+        for action in action_detection_results['detected_actions']:
+            print(f"  - {action['action']}: {action['confidence']:.2f} ({action['details']})")
 
-    # Create final analysis result
+    # Tạo kết quả phân tích cuối cùng
     analysis_result = {
         'detections': detections,
-        'sports_analysis': sports_analysis,
+        'sports_analysis': sports_analysis,  # sports_analysis đã có pose_analysis
         'action_analysis': action_analysis,
         'composition_analysis': composition_analysis,
-        'facial_analysis': facial_analysis,
-        'pose_analysis': pose_results
+        'facial_analysis': facial_analysis
     }
 
-    # Generate visualization
+    # Step 7: Visualize results với hiển thị biểu cảm cải tiến
     print("Visualizing results...")
-    visualize_sports_results(
-        img_data,
-        detections,
-        depth_map,
-        sports_analysis,
-        action_analysis,
-        composition_analysis,
-        facial_analysis
-    )
+    print(f"DEBUG C - ID của sports_analysis trước khi visualize: {id(sports_analysis)}")
+    visualize_sports_results(img_data, detections, depth_map,
+                             sports_analysis, action_analysis, composition_analysis,
+                             facial_analysis)
 
     t_end = time.time()
     print(f"\nAnalysis completed in {t_end - t_start:.2f} seconds")
 
-    # Generate caption
+    # Tạo caption từ kết quả phân tích
     caption = generate_sports_caption(analysis_result)
     print(f"\nCaption: {caption}")
 
-    # Add caption to results
+    # Thêm caption vào kết quả trả về
     analysis_result['caption'] = caption
 
     return analysis_result
 
-def analyze_movement_dynamics(keypoints, prev_keypoints=None, sport_type=None):
-    """
-    Analyze movement dynamics from pose keypoints
-    
-    Args:
-        keypoints: Current frame keypoints
-        prev_keypoints: Previous frame keypoints (if available)
-        sport_type: Type of sport being analyzed
-    
-    Returns:
-        dict: Detailed movement analysis
-    """
-    dynamics = {
-        'speed': None,
-        'direction': None,
-        'force': None,
-        'rotation': None,
-        'extension': None,
-        'balance': None,
-        'specific_action': None,
-        'height': None,
-        'stance': None
-    }
-    
-    def calculate_limb_velocity(current_points, previous_points, joint_pairs):
-        """Calculate velocity between joint pairs"""
-        if not (current_points and previous_points):
-            return 0
-        velocities = []
-        for start, end in joint_pairs:
-            start_key = f"{start}_shoulder" if "shoulder" in start else f"{start}_knee" if "knee" in start else f"{start}_ankle"
-            end_key = f"{end}_shoulder" if "shoulder" in end else f"{end}_knee" if "knee" in end else f"{end}_ankle"
-            
-            if all(p in current_points and p in previous_points 
-                  for p in [start_key, end_key]):
-                curr_vec = (
-                    float(current_points[end_key]['x']) - float(current_points[start_key]['x']),
-                    float(current_points[end_key]['y']) - float(current_points[start_key]['y'])
-                )
-                prev_vec = (
-                    float(previous_points[end_key]['x']) - float(previous_points[start_key]['x']),
-                    float(previous_points[end_key]['y']) - float(previous_points[start_key]['y'])
-                )
-                velocity = math.sqrt(
-                    (curr_vec[0] - prev_vec[0])**2 + 
-                    (curr_vec[1] - prev_vec[1])**2
-                )
-                velocities.append(velocity)
-        return max(velocities) if velocities else 0
-
-    try:
-        # Handle nested keypoints structure
-        if isinstance(keypoints, dict) and 'poses' in keypoints:
-            if keypoints['poses']:
-                keypoints = keypoints['poses'][0].get('keypoints', [])
-        
-        # Convert keypoints to dictionary for easier access
-        current_points = {}
-        for kp in keypoints:
-            if isinstance(kp, dict) and 'name' in kp:
-                current_points[kp['name']] = {
-                    'x': float(kp['x']),
-                    'y': float(kp['y']),
-                    'confidence': float(kp.get('confidence', 0))
-                }
-        
-        # Convert previous keypoints if available
-        previous_points = {}
-        if prev_keypoints:
-            if isinstance(prev_keypoints, dict) and 'poses' in prev_keypoints:
-                if prev_keypoints['poses']:
-                    prev_keypoints = prev_keypoints['poses'][0].get('keypoints', [])
-            
-            for kp in prev_keypoints:
-                if isinstance(kp, dict) and 'name' in kp:
-                    previous_points[kp['name']] = {
-                        'x': float(kp['x']),
-                        'y': float(kp['y']),
-                        'confidence': float(kp.get('confidence', 0))
-                    }
-        
-        # Analyze based on sport type
-        if sport_type:
-            sport_type = sport_type.lower()
-            
-            if sport_type in ['tennis', 'badminton', 'baseball']:
-                # Analyze swing dynamics
-                arm_joints = [
-                    ('left', 'right'),  # For shoulders
-                    ('right', 'left')   # For arms
-                ]
-                swing_velocity = calculate_limb_velocity(
-                    current_points, previous_points, arm_joints
-                )
-                
-                # Determine swing direction using shoulders and wrists
-                if all(k in current_points for k in ['left_shoulder', 'right_shoulder', 'left_wrist', 'right_wrist']):
-                    shoulder_mid_x = (current_points['left_shoulder']['x'] + current_points['right_shoulder']['x']) / 2
-                    wrist_mid_x = (current_points['left_wrist']['x'] + current_points['right_wrist']['x']) / 2
-                    dx = wrist_mid_x - shoulder_mid_x
-                    
-                    if abs(dx) > 50:  # Threshold for significant horizontal movement
-                        dynamics['direction'] = "rightward" if dx > 0 else "leftward"
-                    else:
-                        wrist_y = min(current_points['left_wrist']['y'], current_points['right_wrist']['y'])
-                        shoulder_y = min(current_points['left_shoulder']['y'], current_points['right_shoulder']['y'])
-                        dynamics['direction'] = "upward" if wrist_y < shoulder_y else "downward"
-                
-                # Classify swing speed based on velocity
-                if swing_velocity > 100:  # Adjust thresholds based on your coordinate system
-                    dynamics['speed'] = "powerful"
-                elif swing_velocity > 50:
-                    dynamics['speed'] = "quick"
-                else:
-                    dynamics['speed'] = "controlled"
-                    
-            elif sport_type in ['soccer', 'football']:
-                # Analyze kick dynamics
-                leg_joints = [
-                    ('left', 'right'),  # For knees
-                    ('right', 'left')   # For ankles
-                ]
-                kick_velocity = calculate_limb_velocity(
-                    current_points, previous_points, leg_joints
-                )
-                
-                # Classify kick force
-                if kick_velocity > 80:
-                    dynamics['force'] = "powerful"
-                elif kick_velocity > 40:
-                    dynamics['force'] = "firm"
-                else:
-                    dynamics['force'] = "precise"
-                    
-            elif sport_type == 'running':
-                # Calculate stride length
-                if all(k in current_points for k in ['left_ankle', 'right_ankle']):
-                    stride_length = abs(
-                        current_points['left_ankle']['x'] - 
-                        current_points['right_ankle']['x']
-                    )
-                    
-                    # Classify running speed based on stride
-                    if stride_length > 100:
-                        dynamics['speed'] = "sprinting"
-                    elif stride_length > 60:
-                        dynamics['speed'] = "running"
-                    else:
-                        dynamics['speed'] = "jogging"
-        
-        # Analyze general movement qualities
-        if current_points:
-            # Calculate body extension
-            if all(k in current_points for k in ['left_shoulder', 'right_hip', 'right_knee']):
-                torso_length = math.sqrt(
-                    (current_points['right_hip']['x'] - current_points['left_shoulder']['x'])**2 +
-                    (current_points['right_hip']['y'] - current_points['left_shoulder']['y'])**2
-                )
-                dynamics['extension'] = "extended" if torso_length > 150 else "compact"
-            
-            # Analyze balance
-            if all(k in current_points for k in ['left_ankle', 'right_ankle']):
-                stance_width = abs(
-                    current_points['left_ankle']['x'] - 
-                    current_points['right_ankle']['x']
-                )
-                dynamics['balance'] = "stable" if stance_width > 80 else "dynamic"
-                
-        return dynamics
-        
-    except Exception as e:
-        print(f"Error in movement dynamics analysis: {str(e)}")
-        return dynamics
-
-def generate_movement_description(dynamics, sport_type):
-    if not dynamics or not sport_type:
-        return ""
-        
-    descriptions = []
-    sport_type = sport_type.lower()
-    
-    # Add specific action description
-    if dynamics['specific_action']:
-        if sport_type == 'tennis':
-            descriptions.append(f"executing a {dynamics['speed']} {dynamics['specific_action']}")
-        elif sport_type == 'basketball':
-            descriptions.append(f"performing a {dynamics['speed']} {dynamics['specific_action']}")
-            
-    # Add movement quality
-    if dynamics['speed'] and dynamics['balance']:
-        descriptions.append(f"with {dynamics['speed']} speed and {dynamics['balance']} balance")
-        
-    # Add directional information
-    if dynamics['direction']:
-        descriptions.append(f"moving {dynamics['direction']}")
-        
-    return " ".join(descriptions)
-
-def get_pose_description(sport_type, pose_results):
-    """Generate detailed descriptions of athlete poses based on pose analysis"""
-    if not pose_results or 'poses' not in pose_results:
-        return None
-
-    descriptions = []
-    pose_patterns = pose_results.get('pose_pattern')
-    
-    sport_poses = {
-        'Cycling': {
-            'cycling_position': [
-                "with a streamlined forward-leaning posture",
-                "maintaining an aerodynamic racing position",
-                "showing perfect cycling form with a low profile",
-                "demonstrating optimal riding technique"
-            ],
-            'default': [
-                "displaying proper cycling form",
-                "maintaining an efficient riding stance"
-            ]
-        },
-        'Tennis': {
-            'serve': [
-                "executing a powerful serve with full extension",
-                "reaching maximum height in the serving motion",
-                "displaying perfect service technique",
-                "positioning for an aggressive serve"
-            ],
-            'forehand': [
-                "unleashing a dynamic forehand stroke",
-                "rotating through a powerful forehand motion",
-                "showing perfect forehand technique",
-                "demonstrating exceptional racquet control"
-            ],
-            'backhand': [
-                "executing a precise backhand stroke",
-                "maintaining perfect balance during the backhand",
-                "showing controlled backhand technique",
-                "demonstrating expert backhand form"
-            ],
-            'default': [
-                "displaying professional tennis form",
-                "showing excellent court positioning"
-            ]
-        },
-        'Baseball': {
-            'batting': [
-                "in perfect batting stance with eyes on the ball",
-                "showing powerful hip rotation through the swing",
-                "maintaining ideal contact position",
-                "demonstrating textbook batting technique"
-            ],
-            'pitching': [
-                "displaying perfect pitching mechanics",
-                "executing the precise delivery motion",
-                "showing masterful pitching form",
-                "maintaining controlled throwing position"
-            ],
-            'default': [
-                "showing professional baseball stance",
-                "maintaining athletic readiness"
-            ]
-        },
-        'Rugby': {
-            'running': [
-                "demonstrating powerful running form",
-                "maintaining secure ball control while sprinting",
-                "showing explosive acceleration technique",
-                "displaying perfect ball-carrying form"
-            ],
-            'kicking': [
-                "executing precise kicking technique",
-                "showing perfect leg extension for the kick",
-                "maintaining balanced kicking form",
-                "demonstrating expert kicking mechanics"
-            ],
-            'default': [
-                "displaying athletic rugby stance",
-                "showing professional rugby positioning"
-            ]
-        }
-    }
-
-    # Get pose angles and positions from the first detected person
-    if pose_results['poses']:
-        first_pose = pose_results['poses'][0]
-        
-        # Get sport-specific description
-        if sport_type in sport_poses:
-            pose_options = sport_poses[sport_type].get(
-                pose_patterns, 
-                sport_poses[sport_type]['default']
-            )
-            descriptions.append(random.choice(pose_options))
-            
-            # Add specific angle-based descriptions
-            if 'keypoints' in first_pose:
-                pose_details = analyze_pose_details(first_pose['keypoints'], sport_type)
-                if pose_details:
-                    descriptions.append(pose_details)
-                    
-            # Add movement dynamics if available
-            if 'movement_dynamics' in first_pose:
-                dynamics = analyze_movement_dynamics(first_pose['movement_dynamics'], sport_type)
-                if dynamics:
-                    descriptions.append(dynamics)
-
-    return ", ".join(descriptions) if descriptions else None
-
-def get_enhanced_pose_description(sport_type_original, pose_results):
-    """
-    Get enhanced pose description with detailed error checking
-    """
-    print("DEBUG: Starting get_enhanced_pose_description")
-    print(f"DEBUG: pose_results type: {type(pose_results)}")
-    print(f"DEBUG: pose_results content: {pose_results}")
-
-    try:
-        # If pose_results is None or empty
-        if not pose_results:
-            print("DEBUG: pose_results is empty or None")
-            return "maintaining athletic stance"
-
-        # Get keypoints with validation
-        keypoints = pose_results.get('keypoints', [])
-        print(f"DEBUG: keypoints type: {type(keypoints)}")
-        print(f"DEBUG: first keypoint sample: {keypoints[0] if keypoints else 'no keypoints'}")
-
-        # Get pose details with validation
-        pose_details = analyze_pose_details(keypoints, sport_type_original)
-        print(f"DEBUG: pose_details type: {type(pose_details)}")
-        print(f"DEBUG: pose_details content: {pose_details}")
-
-        # Handle different return types
-        if isinstance(pose_details, list):
-            # Filter out None and empty strings, then join
-            valid_details = [str(detail) for detail in pose_details if detail]
-            return " ".join(valid_details) if valid_details else "maintaining athletic stance"
-        elif isinstance(pose_details, str):
-            return pose_details
-        else:
-            print(f"DEBUG: Unexpected pose_details type: {type(pose_details)}")
-            return "maintaining athletic stance"
-
-    except Exception as e:
-        print(f"DEBUG: Error in get_enhanced_pose_description: {str(e)}")
-        import traceback
-        print(f"DEBUG: Full traceback: {traceback.format_exc()}")
-        return "maintaining athletic stance"
-
-def generate_motion_description(dynamics, sport_type, form_analysis):
-    """Generate more detailed motion descriptions"""
-    try:
-        motion_desc = []
-        
-        if dynamics.get('specific_action'):
-            force = dynamics.get('force', 'controlled')
-            motion_desc.append(f"executing a {force} {dynamics['specific_action']}")
-        
-        if form_analysis.get('body_alignment'):
-            motion_desc.append(f"with {form_analysis['body_alignment']}")
-            
-        if dynamics.get('balance'):
-            motion_desc.append(f"maintaining {dynamics['balance']} balance")
-            
-        if dynamics.get('speed'):
-            motion_desc.append(f"at {dynamics['speed']} speed")
-            
-        return " ".join(motion_desc)
-    except Exception as e:
-        print(f"Error in generate_motion_description: {str(e)}")
-        return ""
-
-def interpret_emotion_in_context(emotion, sport_type, action_level):
-    """Interpret emotions in the context of the sport and action"""
-    if emotion == 'focus' and action_level > 0.7:
-        return "displaying intense concentration"
-    elif emotion == 'determination' and sport_type in ['boxing', 'martial_arts']:
-        return "showing fierce competitive spirit"
-    # Add more context-specific interpretations
-
-def calculate_angle(point1, point2):
-    """Calculate angle between two points relative to vertical"""
-    if not point1 or not point2:
-        return 0
-    return abs(math.degrees(math.atan2(point2['y'] - point1['y'], 
-                                     point2['x'] - point1['x'])))
-
-def calculate_distance(point1, point2):
-    """Calculate Euclidean distance between two points"""
-    if not point1 or not point2:
-        return 0
-    return math.sqrt((point2['x'] - point1['x'])**2 + 
-                    (point2['y'] - point1['y'])**2)
-
-def assess_pose_quality(keypoints, sport_type):
-    """Assess overall quality of the pose"""
-    if not keypoints:
-        return None
-        
-    # Count number of detected keypoints
-    detected_points = sum(1 for kp in keypoints if kp.get('confidence', 0) > 0.5)
-    total_points = len(keypoints)
-    
-    if detected_points / total_points > 0.8:
-        return "with excellent technical form"
-    elif detected_points / total_points > 0.6:
-        return "with good form"
-    elif detected_points / total_points > 0.4:
-        return "maintaining proper form"
-    
-    return None
-
-def calculate_torso_angle(left_point, right_point):
-    """Calculate torso angle relative to horizontal"""
-    try:
-        dx = right_point['x'] - left_point['x']
-        dy = right_point['y'] - left_point['y']
-        angle = abs(np.degrees(np.arctan2(dy, dx)))
-        return angle
-    except:
-        return 45
-
-def calculate_arm_extension(points):
-    """Calculate arm extension angle"""
-    try:
-        # Simplified calculation for example
-        return 135
-    except:
-        return 90
-
-def calculate_stride_length(points):
-    """Calculate normalized stride length"""
-    try:
-        # Simplified calculation for example
-        return 1.3
-    except:
-        return 1.0
-
-def analyze_movement_dynamics(keypoints, prev_keypoints=None, sport_type=None):
-    """
-    Analyze movement dynamics from pose keypoints with detailed sport-specific analysis
-    
-    Args:
-        keypoints: Current frame keypoints
-        prev_keypoints: Previous frame keypoints (optional)
-        sport_type: Type of sport being analyzed
-    
-    Returns:
-        dict: Detailed movement analysis
-    """
-    dynamics = {
-        'speed': None,
-        'direction': None,
-        'force': None,
-        'rotation': None,
-        'extension': None,
-        'balance': None,
-        'specific_action': None,
-        'height': None,
-        'stance': None
-    }
-    
-    def calculate_angle(point1, point2, point3):
-        """Calculate angle between three points"""
-        try:
-            if not all([point1, point2, point3]):
-                return None
-                
-            vector1 = [point1['x'] - point2['x'], point1['y'] - point2['y']]
-            vector2 = [point3['x'] - point2['x'], point3['y'] - point2['y']]
-            
-            dot_product = vector1[0] * vector2[0] + vector1[1] * vector2[1]
-            magnitude1 = math.sqrt(vector1[0]**2 + vector1[1]**2)
-            magnitude2 = math.sqrt(vector2[0]**2 + vector2[1]**2)
-            
-            if magnitude1 == 0 or magnitude2 == 0:
-                return None
-                
-            cos_angle = dot_product / (magnitude1 * magnitude2)
-            angle = math.degrees(math.acos(max(-1, min(1, cos_angle))))
-            return angle
-        except:
-            return None
-
-    def find_keypoint(points, name):
-        """Find keypoint by name in keypoint list"""
-        try:
-            if isinstance(points, list) and points and isinstance(points[0], (list, tuple)):
-                # Array format
-                keypoint_indices = {
-                    'nose': 0,
-                    'left_shoulder': 5, 'right_shoulder': 6,
-                    'left_elbow': 7, 'right_elbow': 8,
-                    'left_wrist': 9, 'right_wrist': 10,
-                    'left_hip': 11, 'right_hip': 12,
-                    'left_knee': 13, 'right_knee': 14,
-                    'left_ankle': 15, 'right_ankle': 16
-                }
-                idx = keypoint_indices.get(name)
-                if idx is not None and idx < len(points):
-                    return {'x': float(points[idx][0]), 'y': float(points[idx][1])}
-            else:
-                # Dictionary format
-                return next((kp for kp in points if kp.get('name') == name), None)
-        except Exception as e:
-            print(f"Error finding keypoint {name}: {str(e)}")
-            return None
-
-    try:
-        if not keypoints:
-            return dynamics
-            
-        # Get key points
-        current_points = {}
-        for joint in ['nose', 'left_shoulder', 'right_shoulder', 'left_elbow', 
-                     'right_elbow', 'left_wrist', 'right_wrist', 'left_hip', 
-                     'right_hip', 'left_knee', 'right_knee', 'left_ankle', 
-                     'right_ankle']:
-            current_points[joint] = find_keypoint(keypoints, joint)
-
-        # Basic stance analysis
-        if all(current_points.get(joint) for joint in ['left_hip', 'right_hip', 'left_knee', 'right_knee']):
-            hip_distance = math.sqrt(
-                (current_points['right_hip']['x'] - current_points['left_hip']['x'])**2 +
-                (current_points['right_hip']['y'] - current_points['left_hip']['y'])**2
-            )
-            knee_distance = math.sqrt(
-                (current_points['right_knee']['x'] - current_points['left_knee']['x'])**2 +
-                (current_points['right_knee']['y'] - current_points['left_knee']['y'])**2
-            )
-            
-            if hip_distance > knee_distance * 1.2:
-                dynamics['stance'] = 'wide'
-            elif hip_distance < knee_distance * 0.8:
-                dynamics['stance'] = 'narrow'
-            else:
-                dynamics['stance'] = 'balanced'
-
-        # Sport-specific analysis
-        if sport_type:
-            sport_type = sport_type.lower()
-            
-            if sport_type in ['tennis', 'badminton']:
-                # Analyze racquet sports movements
-                if all(current_points.get(joint) for joint in ['right_shoulder', 'right_elbow', 'right_wrist']):
-                    arm_angle = calculate_angle(
-                        current_points['right_shoulder'],
-                        current_points['right_elbow'],
-                        current_points['right_wrist']
-                    )
-                    
-                    # Determine specific tennis action
-                    if current_points['right_wrist']['y'] < current_points['right_shoulder']['y']:
-                        dynamics['specific_action'] = 'serve'
-                        dynamics['height'] = 'overhead'
-                    elif arm_angle and arm_angle < 90:
-                        dynamics['specific_action'] = 'forehand'
-                        dynamics['direction'] = 'forward'
-                    else:
-                        dynamics['specific_action'] = 'backhand'
-                        dynamics['direction'] = 'lateral'
-
-                    # Determine shot power
-                    if arm_angle and arm_angle < 45:
-                        dynamics['force'] = 'powerful'
-                    elif arm_angle and arm_angle < 90:
-                        dynamics['force'] = 'moderate'
-                    else:
-                        dynamics['force'] = 'controlled'
-                        
-            elif sport_type in ['basketball']:
-                # Analyze basketball movements
-                if all(current_points.get(joint) for joint in ['right_shoulder', 'right_elbow', 'right_wrist']):
-                    arm_height = current_points['right_wrist']['y']
-                    shoulder_height = current_points['right_shoulder']['y']
-                    
-                    if arm_height < shoulder_height:
-                        dynamics['specific_action'] = 'shot'
-                        dynamics['height'] = 'high'
-                        dynamics['force'] = 'controlled'
-                    else:
-                        dynamics['specific_action'] = 'dribble'
-                        dynamics['height'] = 'low'
-                        dynamics['force'] = 'quick'
-                        
-            elif sport_type in ['soccer', 'football']:
-                # Analyze soccer movements
-                if all(current_points.get(joint) for joint in ['right_hip', 'right_knee', 'right_ankle']):
-                    leg_angle = calculate_angle(
-                        current_points['right_hip'],
-                        current_points['right_knee'],
-                        current_points['right_ankle']
-                    )
-                    
-                    if leg_angle and leg_angle < 90:
-                        dynamics['specific_action'] = 'kick'
-                        dynamics['force'] = 'powerful'
-                    else:
-                        dynamics['specific_action'] = 'control'
-                        dynamics['force'] = 'precise'
-                        
-            elif sport_type == 'running':
-                # Analyze running form
-                if all(current_points.get(joint) for joint in ['left_knee', 'right_knee', 'left_ankle', 'right_ankle']):
-                    knee_height = min(current_points['left_knee']['y'], current_points['right_knee']['y'])
-                    ankle_height = min(current_points['left_ankle']['y'], current_points['right_ankle']['y'])
-                    
-                    stride_length = abs(current_points['left_ankle']['x'] - current_points['right_ankle']['x'])
-                    
-                    if stride_length > 1.0:
-                        dynamics['speed'] = 'sprinting'
-                    elif stride_length > 0.7:
-                        dynamics['speed'] = 'running'
-                    else:
-                        dynamics['speed'] = 'jogging'
-                        
-                    dynamics['form'] = 'high_knees' if knee_height < 0.5 else 'standard'
-                    
-            elif sport_type == 'cycling':
-                # Analyze cycling position
-                if all(current_points.get(joint) for joint in ['shoulder', 'hip', 'knee']):
-                    torso_angle = calculate_angle(
-                        current_points['shoulder'],
-                        current_points['hip'],
-                        current_points['knee']
-                    )
-                    
-                    if torso_angle and torso_angle < 30:
-                        dynamics['position'] = 'aero'
-                        dynamics['speed'] = 'high'
-                    elif torso_angle and torso_angle < 45:
-                        dynamics['position'] = 'dropped'
-                        dynamics['speed'] = 'moderate'
-                    else:
-                        dynamics['position'] = 'upright'
-                        dynamics['speed'] = 'steady'
-
-        # Calculate overall extension
-        if all(current_points.get(joint) for joint in ['shoulder', 'hip', 'knee', 'ankle']):
-            body_extension = abs(current_points['shoulder']['y'] - current_points['ankle']['y'])
-            dynamics['extension'] = 'extended' if body_extension > 0.7 else 'compact'
-
-        return dynamics
-        
-    except Exception as e:
-        print(f"Error in analyze_movement_dynamics: {str(e)}")
-        return dynamics
-
-def analyze_pose_details(keypoints, sport_type):
-    """
-    Analyze pose details with enhanced debugging
-    """
-    print("DEBUG: Starting analyze_pose_details")
-    print(f"DEBUG: keypoints type: {type(keypoints)}")
-    print(f"DEBUG: sport_type: {sport_type}")
-
-    try:
-        if not keypoints:
-            return ["maintaining athletic position"]
-
-        details = []
-
-        # Helper function with debug output
-        def find_keypoint(name):
-            try:
-                if isinstance(keypoints[0], (list, tuple)):
-                    print(f"DEBUG: Processing array-style keypoints for {name}")
-                    keypoint_indices = {
-                        'left_shoulder': 5,
-                        'right_shoulder': 6,
-                        'left_elbow': 7,
-                        'right_elbow': 8,
-                        'left_knee': 13,
-                        'right_knee': 14
-                    }
-                    idx = keypoint_indices.get(name)
-                    if idx is not None and idx < len(keypoints):
-                        return {'x': float(keypoints[idx][0]), 'y': float(keypoints[idx][1])}
-                else:
-                    print(f"DEBUG: Processing dictionary-style keypoints for {name}")
-                    return next((kp for kp in keypoints if kp.get('name') == name), None)
-            except Exception as e:
-                print(f"DEBUG: Error in find_keypoint for {name}: {str(e)}")
-                return None
-
-        # Get keypoints with debug output
-        key_points = {
-            'left_shoulder': find_keypoint('left_shoulder'),
-            'right_shoulder': find_keypoint('right_shoulder'),
-            'left_elbow': find_keypoint('left_elbow'),
-            'right_elbow': find_keypoint('right_elbow'),
-            'left_knee': find_keypoint('left_knee'),
-            'right_knee': find_keypoint('right_knee')
-        }
-
-        print("DEBUG: Found keypoints:", {k: bool(v) for k, v in key_points.items()})
-
-        # Basic stance
-        details.append("maintaining athletic position")
-
-        # Sport-specific analysis with validation
-        sport_type_lower = str(sport_type).lower()
-        
-        # Add sport-specific details
-        if sport_type_lower in ['tennis', 'badminton']:
-            if all([key_points['left_shoulder'], key_points['right_shoulder'], 
-                   key_points['left_elbow'], key_points['right_elbow']]):
-                arm_height = min(float(key_points['left_shoulder']['y']), 
-                               float(key_points['right_shoulder']['y']))
-                details.append("executing a racket sport motion")
-
-        # Always ensure we return a list of strings
-        return [str(detail) for detail in details if detail]
-
-    except Exception as e:
-        print(f"DEBUG: Error in analyze_pose_details: {str(e)}")
-        import traceback
-        print(f"DEBUG: Full traceback: {traceback.format_exc()}")
-        return ["maintaining athletic position"]
-
-def assess_alignment(left_shoulder, right_shoulder, left_knee, right_knee):
-    """Helper function to assess body alignment"""
-    try:
-        shoulder_center = (
-            (float(left_shoulder['x']) + float(right_shoulder['x']))/2, 
-            (float(left_shoulder['y']) + float(right_shoulder['y']))/2
-        )
-        knee_center = (
-            (float(left_knee['x']) + float(right_knee['x']))/2, 
-            (float(left_knee['y']) + float(right_knee['y']))/2
-        )
-        
-        alignment = 1.0 - min(abs(shoulder_center[0] - knee_center[0]), 0.3) / 0.3
-        return max(0.0, min(1.0, alignment))
-    except Exception as e:
-        print(f"Error in assess_alignment: {str(e)}")
-        return 0.6
-
-#def assess_alignment(left_shoulder, right_shoulder, left_knee, right_knee):
-#    """Helper function to assess body alignment"""
-#    try:
-#        shoulder_center = ((left_shoulder['x'] + right_shoulder['x'])/2, 
-#                         (left_shoulder['y'] + right_shoulder['y'])/2)
-#        knee_center = ((left_knee['x'] + right_knee['x'])/2, 
-#                      (left_knee['y'] + right_knee['y'])/2)
-#        
-#        alignment = 1.0 - min(abs(shoulder_center[0] - knee_center[0]), 0.3) / 0.3
-#        return max(0.0, min(1.0, alignment))
-#    except:
-#        return 0.6  # Default to moderate alignment if calculation fails
-
-    return context
-
-def analyze_formation_pattern(proximity_map, boxes):
-    """Analyzes the spatial arrangement of athletes to determine formation patterns"""
-    if not proximity_map or not boxes:
-        return None
-        
-    # Calculate centroid distances and angles
-    centroids = []
-    for box in boxes:
-        x_center = (box[0] + box[2]) / 2
-        y_center = (box[1] + box[3]) / 2
-        centroids.append((x_center, y_center))
-    
-    # Analyze formation characteristics
-    if len(centroids) < 3:
-        return "linear"
-        
-    # Check for linear formation
-    points = np.array(centroids)
-    
-    if len(points) >= 3:
-        # Fit a line to the points
-        vx, vy, x0, y0 = cv2.fitLine(points, cv2.DIST_L2, 0, 0.01, 0.01)
-        
-        # Calculate distances to the fitted line
-        distances = []
-        for (x, y) in points:
-            distance = abs((vy*(x - x0) - vx*(y - y0)) / np.sqrt(vx*vx + vy*vy))
-            distances.append(distance)
-            
-        # If most points are close to the line, it's linear
-        if np.mean(distances) < 0.2 * np.max(distances):
-            return "linear"
-    
-    # Check for triangular formation
-    if len(centroids) >= 3:
-        hull = ConvexHull(points)
-        if len(hull.vertices) == 3:
-            return "triangular"
-    
-    # Check for circular formation
-    if len(centroids) >= 4:
-        center = np.mean(points, axis=0)
-        distances_to_center = np.linalg.norm(points - center, axis=1)
-        if np.std(distances_to_center) < 0.3 * np.mean(distances_to_center):
-            return "circular"
-    
-    return "scattered"
-
-def estimate_depth_layers(boxes):
-    """Estimates the number of depth layers in the scene based on box positions"""
-    if not boxes:
-        return 1
-        
-    # Extract y-coordinates of box centers
-    y_centers = [(box[1] + box[3]) / 2 for box in boxes]
-    
-    # Use clustering to identify distinct depth layers
-    if len(y_centers) > 1:
-        y_array = np.array(y_centers).reshape(-1, 1)
-        clustering = KMeans(n_clusters=min(len(y_centers), 5)).fit(y_array)
-        return len(np.unique(clustering.labels_))
-    
-    return 1
-
-def analyze_athlete_stance(pose_results, sport_type):
-    """Analyzes athlete stance based on pose keypoints"""
-    if not pose_results or 'poses' not in pose_results:
-        return "professional form"
-        
-    stance_descriptions = {
-        'soccer': {
-            'attacking': "aggressive attacking stance",
-            'defensive': "solid defensive position",
-            'running': "dynamic running form"
-        },
-        'tennis': {
-            'serve': "perfect service stance",
-            'forehand': "balanced forehand position",
-            'backhand': "technical backhand form"
-        },
-        'basketball': {
-            'shooting': "textbook shooting form",
-            'defensive': "athletic defensive stance",
-            'dribbling': "controlled dribbling position"
-        }
-    }
-    
-    sport_lower = sport_type.lower()
-    if sport_lower in stance_descriptions:
-        pose_type = pose_results.get('pose_pattern', 'default')
-        return stance_descriptions[sport_lower].get(pose_type, "professional form")
-    
-    return "professional form"
-
-def analyze_dual_athlete_interaction(pose_results, sport_type):
-    """Analyzes interaction between two athletes"""
-    interaction_types = {
-        'tennis': "intense rally exchange",
-        'soccer': "dynamic one-on-one contest",
-        'basketball': "close defensive coverage",
-        'rugby': "powerful physical contest"
-    }
-    
-    return interaction_types.get(sport_type.lower(), "competitive exchange")
-
-def analyze_group_movement(pose_results, sport_type):
-    """Analyzes collective movement patterns"""
-    movement_patterns = {
-        'soccer': "coordinated tactical movement",
-        'basketball': "fluid team rotation",
-        'volleyball': "synchronized court coverage",
-        'rugby': "cohesive unit movement"
-    }
-    
-    return movement_patterns.get(sport_type.lower(), "synchronized movement")
-
-def clean_caption(caption):
-    """Cleans and formats the final caption"""
-    # Remove multiple spaces
-    caption = ' '.join(caption.split())
-    
-    # Fix punctuation spacing
-    caption = caption.replace(' ,', ',')
-    caption = caption.replace(' .', '.')
-    caption = caption.replace('  ', ' ')
-    
-    # Ensure proper capitalization
-    caption = caption[0].upper() + caption[1:]
-    
-    # Ensure proper ending
-    if not caption.endswith('.'):
-        caption += '.'
-        
-    # Add metadata
-    timestamp = "2025-05-31 04:45:06"  # Using provided timestamp
-    user = "Per0s"  # Using provided user login
-    caption = f"{caption}\n\nGenerated by {user} at {timestamp} UTC"
-    
-    return caption
-
-def generate_smart_suggestion(analysis_result):
-    """
-    Tạo 1 câu gợi ý thông minh dựa trên kết quả phân tích
-    """
-    # Lấy các thông số từ kết quả phân tích
-    action_level = analysis_result.get('action_analysis', {}).get('action_level', 0)
-    framing_quality = analysis_result.get('composition_analysis', {}).get('framing_quality', 'Unknown')
-    athletes_count = analysis_result.get('detections', {}).get('athletes', 0)
-    sport_type = analysis_result.get('composition_analysis', {}).get('sport_type', 'Unknown')
-
-    # Tính điểm sharpness trung bình nếu có
-    avg_sharpness = 0
-    if 'sports_analysis' in analysis_result and 'sharpness_scores' in analysis_result['sports_analysis']:
-        sharpness_scores = analysis_result['sports_analysis']['sharpness_scores']
-        if sharpness_scores:
-            avg_sharpness = sum(sharpness_scores) / len(sharpness_scores)
-
-    # Kiểm tra có emotion không
-    has_emotion = analysis_result.get('facial_analysis', {}).get('has_faces', False)
-    emotion_intensity = analysis_result.get('facial_analysis', {}).get('emotion_intensity', 0) if has_emotion else 0
-
-    # Ưu tiên theo mức độ quan trọng
-    # 1. Action level thấp
-    if action_level < 0.4:
-        return "Try capturing during peak action moments for more dynamic sports photography."
-
-    # 2. Framing kém
-    if framing_quality in ['Poor', 'Could be improved', 'Fair']:
-        return "Apply the rule of thirds and ensure subjects are well-positioned in the frame."
-
-    # 3. Sharpness thấp
-    if avg_sharpness < 0.5:
-        return "Use faster shutter speed and proper focus to achieve sharper subject details."
-
-    # 4. Không có emotion
-    if not has_emotion and athletes_count > 0:
-        return "Consider angles that capture athlete expressions for more engaging storytelling."
-
-    # 5. Emotion tốt
-    if has_emotion and emotion_intensity > 0.7:
-        return "Excellent emotional capture! This adds great storytelling value to your sports photo."
-
-    # 6. Action tốt nhưng có thể cải thiện khác
-    if action_level > 0.7 and avg_sharpness > 0.6:
-        return "Great action shot! Consider varying angles or including more context for visual variety."
-
-    # 7. Suggestion chung theo môn thể thao
-    if sport_type.lower() in ['soccer', 'football', 'basketball']:
-        return "For team sports, try capturing player interactions and tactical moments."
-    elif sport_type.lower() in ['tennis', 'golf', 'athletics']:
-        return "Focus on technique and form - these sports offer great opportunities for skill showcase."
-
-    # 8. Default suggestion
-    return "Solid sports photography! Experiment with different perspectives to add creative flair."
-
-def generate_high_action_intros(sport_name, scene_analysis, intro_context):
-    """Generate introduction phrases for high-action scenes"""
-    venue = intro_context.get('venue_type', 'standard')
-    competition = intro_context.get('competition_level', 'professional')
-    
-    intros = [
-        f"A spectacular moment of {sport_name} excellence",
-        f"An electrifying display of {sport_name} athleticism",
-        f"A breathtaking sequence in {sport_name} competition",
-        f"An explosive {sport_name} action capture",
-        f"A pinnacle moment in {sport_name} performance"
-    ]
-    
-    if venue == 'professional':
-        intros.extend([
-            f"A professional-level {sport_name} spectacle",
-            f"An elite {sport_name} competition moment"
-        ])
-        
-    if competition == 'professional':
-        intros.extend([
-            f"A world-class display of {sport_name} mastery",
-            f"A professional {sport_name} competition highlight"
-        ])
-        
-    return intros
-
-def generate_generic_high_action_intros(scene_analysis, intro_context):
-    """Generate generic introduction phrases for high-action scenes"""
-    return [
-        "A powerful display of athletic excellence",
-        "An intense moment of sporting brilliance",
-        "A dynamic showcase of competitive spirit",
-        "A spectacular athletic performance capture",
-        "An extraordinary display of physical prowess"
-    ]
-
-def generate_medium_action_intros(sport_name, scene_analysis, intro_context):
-    """Generate introduction phrases for medium-action scenes"""
-    return [
-        f"A skillful demonstration of {sport_name} technique",
-        f"An engaging moment in {sport_name} competition",
-        f"A well-executed {sport_name} sequence",
-        f"A focused display of {sport_name} expertise",
-        f"A technical showcase of {sport_name} ability"
-    ]
-
-def generate_generic_medium_action_intros(scene_analysis, intro_context):
-    """Generate generic introduction phrases for medium-action scenes"""
-    return [
-        "A composed display of athletic skill",
-        "A measured moment of sporting excellence",
-        "A precise demonstration of competitive ability",
-        "A focused athletic performance",
-        "A controlled display of sporting expertise"
-    ]
-
-def generate_low_action_intros(sport_name, scene_analysis, intro_context):
-    """Generate introduction phrases for low-action scenes"""
-    return [
-        f"A tactical moment in {sport_name} competition",
-        f"A strategic pause during {sport_name} play",
-        f"A calculated {sport_name} sequence",
-        f"A preparatory phase of {sport_name} action",
-        f"A measured moment in {sport_name} execution"
-    ]
-
-def generate_generic_low_action_intros(scene_analysis, intro_context):
-    """Generate generic introduction phrases for low-action scenes"""
-    return [
-        "A moment of athletic preparation",
-        "A strategic pause in competitive action",
-        "A calculated sporting maneuver",
-        "A focused pre-action sequence",
-        "A deliberate competitive moment"
-    ]
-
-def enhance_intro_with_context(base_intro, scene_analysis, intro_context, sport_evidence):
-    """Enhance the basic intro with additional context"""
-    enhanced = base_intro
-    
-    # Add environmental context if available
-    if intro_context.get('venue_type'):
-        venue_desc = {
-            'stadium': "in a packed stadium",
-            'arena': "in a professional arena",
-            'court': "on a competition court",
-            'field': "on a professional field",
-            'track': "on an athletic track"
-        }
-        venue = intro_context['venue_type'].lower()
-        if venue in venue_desc:
-            enhanced += f" {venue_desc[venue]}"
-    
-    # Add weather context for outdoor venues
-    if intro_context.get('weather'):
-        weather_desc = {
-            'sunny': "under bright sunny conditions",
-            'cloudy': "beneath dramatic cloud cover",
-            'overcast': "in atmospheric overcast conditions",
-            'indoor': "under controlled indoor conditions"
-        }
-        weather = intro_context['weather'].lower()
-        if weather in weather_desc:
-            enhanced += f" {weather_desc[weather]}"
-    
-    # Add competition level context if available
-    if intro_context.get('competition_level') == 'professional':
-        enhanced += " at the professional level"
-    
-    # Add time context if relevant
-    if intro_context.get('time_of_day'):
-        time_desc = {
-            'morning': "during early morning competition",
-            'afternoon': "in peak afternoon action",
-            'evening': "under evening conditions",
-            'night': "under professional lighting"
-        }
-        time = intro_context['time_of_day'].lower()
-        if time in time_desc:
-            enhanced += f" {time_desc[time]}"
-    
-    return enhanced
-
-def get_sport_specific_description(sport_type, action_type):
-    """
-    Generate sport-specific movement descriptions based on sport type and action intensity.
-    
-    Args:
-        sport_type (str): Type of sport being analyzed
-        action_type (str): Level of action ('high' or 'medium')
-    
-    Returns:
-        str: Sport-specific movement description
-    """
-    movement_descriptions = {
-        'soccer': {
-            'high': [
-                "executing a precise ball control",
-                "demonstrating exceptional footwork",
-                "showing masterful ball handling",
-                "performing an agile maneuver"
-            ],
-            'medium': [
-                "maintaining tactical positioning",
-                "showing controlled ball movement",
-                "demonstrating steady footwork",
-                "executing a calculated play"
-            ]
-        },
-        'football': {
-            'high': [
-                "demonstrating explosive athleticism",
-                "executing a powerful play",
-                "showing remarkable agility",
-                "performing an athletic leap"
-            ],
-            'medium': [
-                "maintaining strategic position",
-                "showing controlled movement",
-                "executing a planned maneuver",
-                "demonstrating tactical awareness"
-            ]
-        },
-        'basketball': {
-            'high': [
-                "executing a dynamic play",
-                "showing exceptional court movement",
-                "demonstrating elite ball handling",
-                "performing an explosive maneuver"
-            ],
-            'medium': [
-                "maintaining court position",
-                "showing controlled dribbling",
-                "executing fundamental moves",
-                "demonstrating tactical play"
-            ]
-        },
-        'tennis': {
-            'high': [
-                "executing a powerful stroke",
-                "demonstrating exceptional racquet control",
-                "showing advanced court movement",
-                "performing an aggressive return"
-            ],
-            'medium': [
-                "maintaining steady form",
-                "showing controlled strokes",
-                "executing consistent returns",
-                "demonstrating proper technique"
-            ]
-        },
-        'baseball': {
-            'high': [
-                "executing a powerful swing",
-                "demonstrating elite batting form",
-                "showing exceptional fielding",
-                "performing an explosive throw"
-            ],
-            'medium': [
-                "maintaining batting stance",
-                "showing controlled movement",
-                "executing fundamental plays",
-                "demonstrating proper form"
-            ]
-        },
-        'swimming': {
-            'high': [
-                "executing powerful strokes",
-                "demonstrating excellent technique",
-                "showing exceptional speed",
-                "performing an efficient turn"
-            ],
-            'medium': [
-                "maintaining steady pace",
-                "showing controlled breathing",
-                "executing consistent strokes",
-                "demonstrating proper form"
-            ]
-        },
-        'volleyball': {
-            'high': [
-                "executing a powerful spike",
-                "demonstrating exceptional jumping",
-                "showing advanced court coverage",
-                "performing an aggressive serve"
-            ],
-            'medium': [
-                "maintaining court position",
-                "showing controlled movements",
-                "executing basic plays",
-                "demonstrating proper form"
-            ]
-        },
-        'track': {
-            'high': [
-                "executing powerful strides",
-                "demonstrating explosive speed",
-                "showing exceptional form",
-                "performing at peak acceleration"
-            ],
-            'medium': [
-                "maintaining steady pace",
-                "showing controlled strides",
-                "executing consistent form",
-                "demonstrating proper technique"
-            ]
-        },
-        'running': {
-            'high': [
-                "executing powerful strides",
-                "demonstrating peak form",
-                "showing excellent pace",
-                "performing at high intensity"
-            ],
-            'medium': [
-                "maintaining steady rhythm",
-                "showing consistent form",
-                "executing controlled strides",
-                "demonstrating proper technique"
-            ]
-        },
-        'boxing': {
-            'high': [
-                "executing powerful combinations",
-                "demonstrating explosive movement",
-                "showing advanced footwork",
-                "performing aggressive strikes"
-            ],
-            'medium': [
-                "maintaining guard position",
-                "showing controlled movement",
-                "executing basic combinations",
-                "demonstrating proper form"
-            ]
-        },
-        'skiing': {
-            'high': [
-                "executing advanced techniques",
-                "demonstrating exceptional control",
-                "showing masterful edge control",
-                "performing aggressive turns"
-            ],
-            'medium': [
-                "maintaining balanced form",
-                "showing controlled descent",
-                "executing steady turns",
-                "demonstrating proper technique"
-            ]
-        },
-        'skating': {
-            'high': [
-                "executing complex maneuvers",
-                "demonstrating exceptional balance",
-                "showing advanced footwork",
-                "performing precise jumps"
-            ],
-            'medium': [
-                "maintaining steady rhythm",
-                "showing controlled movements",
-                "executing basic elements",
-                "demonstrating proper form"
-            ]
-        },
-        'surfing': {
-            'high': [
-                "executing advanced maneuvers",
-                "demonstrating exceptional control",
-                "showing masterful wave reading",
-                "performing aggressive turns"
-            ],
-            'medium': [
-                "maintaining balance",
-                "showing controlled riding",
-                "executing basic maneuvers",
-                "demonstrating proper form"
-            ]
-        },
-        'skateboarding': {
-            'high': [
-                "executing complex tricks",
-                "demonstrating exceptional control",
-                "showing advanced technique",
-                "performing aggressive maneuvers"
-            ],
-            'medium': [
-                "maintaining balance",
-                "showing controlled movement",
-                "executing basic tricks",
-                "demonstrating proper form"
-            ]
-        },
-        'golf': {
-            'high': [
-                "executing a powerful swing",
-                "demonstrating exceptional control",
-                "showing advanced technique",
-                "performing precise shots"
-            ],
-            'medium': [
-                "maintaining proper stance",
-                "showing controlled swing",
-                "executing basic shots",
-                "demonstrating proper form"
-            ]
-        },
-        'rugby': {
-            'high': [
-                "executing powerful runs",
-                "demonstrating explosive movement",
-                "showing aggressive tackles",
-                "performing dynamic plays"
-            ],
-            'medium': [
-                "maintaining tactical position",
-                "showing controlled movement",
-                "executing set plays",
-                "demonstrating proper form"
-            ]
-        },
-        'martial arts': {
-            'high': [
-                "executing complex techniques",
-                "demonstrating explosive movement",
-                "showing advanced combinations",
-                "performing powerful strikes"
-            ],
-            'medium': [
-                "maintaining proper stance",
-                "showing controlled movement",
-                "executing basic techniques",
-                "demonstrating proper form"
-            ]
-        },
-        'cycling': {
-            'high': [
-                "maintaining optimal racing position",
-                "demonstrating powerful pedaling",
-                "showing exceptional endurance",
-                "performing strategic acceleration"
-            ],
-            'medium': [
-                "maintaining steady cadence",
-                "showing controlled riding",
-                "executing proper form",
-                "demonstrating efficient technique"
-            ]
-        }
-    }
-
-    sport_type_lower = sport_type.lower()
-    if sport_type_lower in movement_descriptions:
-        action_level = 'high' if action_type == 'high' else 'medium'
-        return random.choice(movement_descriptions[sport_type_lower][action_level])
-    
-    # Default return for unknown sports
-    return "displaying athletic movement" if action_type == 'high' else "maintaining proper form"
-
-def verify_sport_movement(sport_type, movement_type):
-    """
-    Verify if a movement is valid for a specific sport.
-    
-    Args:
-        sport_type (str): Type of sport being analyzed
-        movement_type (str): Type of movement being verified
-    
-    Returns:
-        bool: Whether the movement is valid for the sport
-    """
-    sport_valid_movements = {
-        'soccer': ['kick', 'run', 'jump', 'header', 'tackle', 'dribble'],
-        'football': ['run', 'jump', 'catch', 'throw', 'tackle', 'block'],
-        'basketball': ['jump', 'run', 'dribble', 'shoot', 'pass', 'block'],
-        'tennis': ['serve', 'forehand', 'backhand', 'volley', 'smash', 'run'],
-        'baseball': ['swing', 'throw', 'catch', 'run', 'slide', 'pitch'],
-        'swimming': ['freestyle', 'butterfly', 'backstroke', 'breaststroke', 'dive', 'turn'],
-        'volleyball': ['jump', 'spike', 'serve', 'block', 'dig', 'set'],
-        'track': ['sprint', 'run', 'jump', 'hurdle', 'relay', 'start'],
-        'running': ['sprint', 'jog', 'run', 'stride', 'accelerate', 'pace'],
-        'boxing': ['punch', 'block', 'dodge', 'weave', 'clinch', 'footwork'],
-        'skiing': ['carve', 'jump', 'traverse', 'turn', 'stop', 'descend'],
-        'skating': ['jump', 'spin', 'glide', 'turn', 'stop', 'stride'],
-        'surfing': ['ride', 'turn', 'cutback', 'aerial', 'paddle', 'duck dive'],
-        'skateboarding': ['ollie', 'grind', 'flip', 'slide', 'jump', 'turn'],
-        'golf': ['swing', 'putt', 'chip', 'drive', 'approach', 'pitch'],
-        'rugby': ['run', 'pass', 'tackle', 'kick', 'ruck', 'maul'],
-        'martial arts': ['kick', 'punch', 'block', 'throw', 'grapple', 'strike'],
-        'cycling': ['pedal', 'sprint', 'climb', 'descend', 'accelerate', 'draft']
-    }
-    
-    return (sport_type.lower() in sport_valid_movements and 
-            movement_type.lower() in sport_valid_movements[sport_type.lower()])
 
 def generate_sports_caption(analysis_result):
     """
@@ -5538,34 +5297,6 @@ def generate_sports_caption(analysis_result):
     Returns:
         str: Well-crafted caption describing the sports image
     """
-    
-    # Check if analysis_result is provided
-    if analysis_result is None:
-        return "Error: No image analysis data available"
-
-    # Initialize default values for required fields
-    default_analysis = {
-        'detections': {},
-        'sports_analysis': {},
-        'action_analysis': {},
-        'composition_analysis': {},
-        'facial_analysis': {}
-    }
-    
-    # Merge provided analysis with defaults
-    analysis_result = {**default_analysis, **analysis_result}
-    
-    # Extract key information with safe gets
-    detections = analysis_result.get('detections', {})
-    sports_analysis = analysis_result.get('sports_analysis', {})
-    action_analysis = analysis_result.get('action_analysis', {})
-    composition_analysis = analysis_result.get('composition_analysis', {})
-    facial_analysis = analysis_result.get('facial_analysis', {})
-
-    # Add error handling for required fields
-    if not all([detections, sports_analysis, action_analysis, composition_analysis]):
-        return "Error: Incomplete image analysis data"
-    
     # Extract key information from analysis results
     detections = analysis_result.get('detections', {})
     sports_analysis = analysis_result.get('sports_analysis', {})
@@ -5580,295 +5311,36 @@ def generate_sports_caption(analysis_result):
     emotion_phrases = []  # Emotional aspects
     detail_phrases = []  # Additional details
     closing_phrases = []  # Conclusion
-    
+
     # ----------------- 1. IDENTIFY SPORT TYPE -----------------
     sport_type = composition_analysis.get('sport_type', 'Running').lower()
     sport_type_original = composition_analysis.get('sport_type', 'Running')
-    
-    # Add the try-except block here, around the pose analysis
-    # Replace the section in your try block with this:
-    try:
-        pose_results = analysis_result.get('pose_analysis', {})
-        #print(f"DEBUG: Main - pose_results: {pose_results}")
-        
-        # Extract keypoints correctly from pose_results structure
-        current_keypoints = []
-        if 'poses' in pose_results and pose_results['poses']:
-            current_keypoints = pose_results['poses'][0].get('keypoints', [])
-        previous_keypoints = pose_results.get('previous_keypoints', [])
-        
-        # Get sport type and action level
-        detected_sport = pose_results.get('identified_sport', sport_type_original)
-        action_level = action_analysis.get('action_level', 0.5)
-        
-        # Determine action quality based on action level
-        if action_level > 0.7:
-            action_quality = 'High'
-        elif action_level > 0.4:
-            action_quality = 'Medium'
-        else:
-            action_quality = 'Low'
-        
-        print(f"DEBUG: action_level = {action_level}")
-        print(f"DEBUG: action_quality = {action_quality}")
-        
-        # 1. Analyze athlete stance first
-        stance_description = analyze_athlete_stance(pose_results, detected_sport)
-        
-        # 2. Get movement dynamics
-        movement_dynamics = analyze_movement_dynamics(
-            current_keypoints,
-            previous_keypoints,
-            sport_type_original
-        )
-        print(f"DEBUG: Movement dynamics: {movement_dynamics}")
-        
-        # 3. Analyze pose details
-        pose_details = analyze_pose_details(current_keypoints, detected_sport)
-        
-        # 4. Generate motion description
-        form_analysis = {
-            'body_alignment': stance_description,
-            'movement_quality': pose_details[0] if pose_details else "maintaining form"
-        }
-        
-        motion_desc = generate_motion_description(
-            movement_dynamics,
-            detected_sport,
-            form_analysis
-        )
-        
-        # 5. Get emotion interpretation
-        emotion_context = interpret_emotion_in_context(
-            facial_analysis.get('dominant_emotion', ''),
-            detected_sport,
-            action_level
-        )
-        
-        # 6. Build the action description
-        action_desc = []
-        
-        # Add stance and pose details
-        action_desc.append(stance_description)
-        
-        # Add sport-specific description
-        sport_specific_action = get_sport_specific_description(
-            detected_sport, 
-            'high' if action_level > 0.7 else 'medium'
-        )
-        if sport_specific_action:
-            action_desc.append(sport_specific_action)
-        
-        # Add motion description
-        if motion_desc:
-            action_desc.append(motion_desc)
-        
-        # Add emotion context
-        if emotion_context:
-            action_desc.append(emotion_context)
-        
-        # Combine all descriptions
-        final_action_desc = " ".join(action_desc)
-        action_phrases.append(final_action_desc)
-        
-        # ----------------- 5. DESCRIBE ACTION -----------------
-        if action_quality:
-            # Get the base action description from our previous analysis
-            base_action_desc = action_phrases[-1] if action_phrases else ""
-            
-            # Create sport-specific action options
-            if detected_sport and base_action_desc:
-                if action_quality == 'High':
-                    if detected_sport in ['soccer', 'football', 'basketball', 'volleyball']:
-                        action_options = [
-                            f"{base_action_desc}, intensifying during a crucial play",
-                            f"{base_action_desc}, peaking at a decisive moment",
-                            f"{base_action_desc}, executing with exceptional precision",
-                            f"{base_action_desc}, demonstrating elite-level execution"
-                        ]
-                    elif detected_sport in ['tennis', 'baseball', 'golf']:
-                        action_options = [
-                            f"{base_action_desc}, achieving perfect technical form",
-                            f"{base_action_desc}, displaying masterful control",
-                            f"{base_action_desc}, executing with pinpoint accuracy",
-                            f"{base_action_desc}, showing expert timing"
-                        ]
-                    elif detected_sport in ['skiing', 'snowboarding']:
-                        action_options = [
-                            f"{base_action_desc}, mastering the challenging conditions",
-                            f"{base_action_desc}, maintaining perfect balance",
-                            f"{base_action_desc}, showing exceptional terrain reading",
-                            f"{base_action_desc}, demonstrating advanced technique"
-                        ]
-                    elif detected_sport in ['running', 'track', 'swimming']:
-                        action_options = [
-                            f"{base_action_desc}, reaching peak performance",
-                            f"{base_action_desc}, displaying supreme conditioning",
-                            f"{base_action_desc}, maintaining optimal form",
-                            f"{base_action_desc}, showing exceptional endurance"
-                        ]
-                    else:
-                        action_options = [
-                            f"{base_action_desc}, reaching athletic excellence",
-                            f"{base_action_desc}, showing professional-level execution",
-                            f"{base_action_desc}, demonstrating superior skill",
-                            f"{base_action_desc}, displaying technical mastery"
-                        ]
-                elif action_quality == 'Medium':
-                    action_options = [
-                        f"{base_action_desc}, showing good technical execution",
-                        f"{base_action_desc}, maintaining consistent form",
-                        f"{base_action_desc}, displaying solid athleticism",
-                        f"{base_action_desc}, demonstrating proper technique"
-                    ]
-                else:
-                    action_options = [
-                        f"{base_action_desc}, focusing on fundamentals",
-                        f"{base_action_desc}, maintaining basic form",
-                        f"{base_action_desc}, showing controlled movement",
-                        f"{base_action_desc}, executing with care"
-                    ]
-                import random
-                # Replace the previous action description with the enhanced version
-                action_phrases[-1] = random.choice(action_options)
-        
-        # Ensure string output for pose description
-        if isinstance(get_pose_description, list):
-            pose_description = " ".join(str(x) for x in get_pose_description if x)
-        elif not isinstance(get_pose_description, str):
-            pose_description = str(get_pose_description)
-                
-    except Exception as e:
-        print(f"Error analyzing pose: {str(e)}")
-        print(f"DEBUG: Exception details - {type(e).__name__}")
-        pose_description = "maintaining athletic stance"
-
     athlete_count = detections.get('athletes', 0)
     action_level = action_analysis.get('action_level', 0)
+    action_quality = action_analysis.get('action_quality', '')
     equipment = action_analysis.get('equipment_types', [])
 
     # Sport-specific terminology
     sport_specific_terms = {
-    'soccer': {
-        'positions': ['striker', 'defender', 'midfielder', 'goalkeeper'],
-        'techniques': ['dribbling', 'passing', 'shooting', 'tackling'],
-        'equipment': ['soccer ball', 'cleats', 'shin guards'],
-        'actions': ['kick', 'header', 'slide tackle', 'save'],
-        'field_terms': ['pitch', 'penalty area', 'goal', 'sideline']
-    },
-    'football': {
-        'positions': ['quarterback', 'receiver', 'linebacker', 'safety'],
-        'techniques': ['passing', 'catching', 'blocking', 'rushing'],
-        'equipment': ['football', 'helmet', 'pads'],
-        'actions': ['throw', 'catch', 'tackle', 'run'],
-        'field_terms': ['end zone', 'yard line', 'sideline', 'stadium']
-    },
-    'basketball': {
-        'positions': ['guard', 'forward', 'center'],
-        'techniques': ['dribbling', 'shooting', 'passing', 'defense'],
-        'equipment': ['basketball', 'court shoes'],
-        'actions': ['shoot', 'dribble', 'pass', 'block'],
-        'court_terms': ['court', 'hoop', 'backboard', 'three-point line']
-    },
-    'tennis': {
-        'positions': ['baseline', 'net', 'serving position'],
-        'techniques': ['serve', 'forehand', 'backhand', 'volley'],
-        'equipment': ['tennis racket', 'tennis ball', 'court shoes'],
-        'actions': ['serve', 'return', 'smash', 'lob'],
-        'court_terms': ['court', 'baseline', 'service box', 'net']
-    },
-    'baseball': {
-        'positions': ['pitcher', 'batter', 'catcher', 'fielder'],
-        'techniques': ['pitching', 'batting', 'catching', 'fielding'],
-        'equipment': ['baseball', 'bat', 'glove', 'helmet'],
-        'actions': ['pitch', 'swing', 'catch', 'throw'],
-        'field_terms': ['diamond', 'base', 'mound', 'outfield']
-    },
-    'swimming': {
-        'positions': ['starting block', 'in-water position'],
-        'techniques': ['freestyle', 'butterfly', 'backstroke', 'breaststroke'],
-        'equipment': ['swimsuit', 'goggles', 'swim cap'],
-        'actions': ['dive', 'stroke', 'turn', 'finish'],
-        'pool_terms': ['lane', 'pool', 'wall', 'starting block']
-    },
-    'volleyball': {
-        'positions': ['setter', 'spiker', 'libero'],
-        'techniques': ['serving', 'setting', 'spiking', 'blocking'],
-        'equipment': ['volleyball', 'knee pads'],
-        'actions': ['serve', 'spike', 'block', 'dig'],
-        'court_terms': ['court', 'net', 'line', 'antenna']
-    },
-    'track': {
-        'positions': ['starting blocks', 'lanes'],
-        'techniques': ['sprinting', 'pacing', 'passing'],
-        'equipment': ['spikes', 'starting blocks', 'baton'],
-        'actions': ['sprint', 'hand-off', 'stride', 'finish'],
-        'track_terms': ['lane', 'finish line', 'relay zone', 'curve']
-    },
-    'running': {
-        'positions': ['starting position', 'racing position'],
-        'techniques': ['sprinting', 'distance running', 'trail running'],
-        'equipment': ['running shoes', 'track spikes', 'racing kit'],
-        'actions': ['sprint', 'stride', 'accelerate', 'pace'],
-        'terms': ['track', 'trail', 'course', 'finish line']
-    },
-    'boxing': {
-        'positions': ['fight stance', 'guard position'],
-        'techniques': ['jab', 'cross', 'hook', 'uppercut'],
-        'equipment': ['gloves', 'headgear', 'mouthguard'],
-        'actions': ['punch', 'block', 'dodge', 'clinch'],
-        'ring_terms': ['ring', 'corner', 'ropes', 'canvas']
-    },
-    'skiing': {
-        'positions': ['racing stance', 'carving position'],
-        'techniques': ['carving', 'parallel turns', 'moguls'],
-        'equipment': ['skis', 'poles', 'boots', 'goggles'],
-        'actions': ['carve', 'jump', 'traverse', 'brake'],
-        'slope_terms': ['slope', 'powder', 'trail', 'mogul']
-    },
-    'skating': {
-        'positions': ['racing position', 'artistic pose'],
-        'techniques': ['jumps', 'spins', 'footwork', 'gliding'],
-        'equipment': ['skates', 'protective gear'],
-        'actions': ['jump', 'spin', 'glide', 'turn'],
-        'rink_terms': ['ice', 'rink', 'barrier', 'center']
-    },
-    'surfing': {
-        'positions': ['standing', 'paddling', 'duck diving'],
-        'techniques': ['carving', 'aerial', 'tube riding'],
-        'equipment': ['surfboard', 'wetsuit', 'leash'],
-        'actions': ['paddle', 'pop-up', 'carve', 'ride'],
-        'ocean_terms': ['wave', 'break', 'lineup', 'beach']
-    },
-    'skateboarding': {
-        'positions': ['regular stance', 'goofy stance'],
-        'techniques': ['ollie', 'kickflip', 'grind'],
-        'equipment': ['skateboard', 'helmet', 'pads'],
-        'actions': ['push', 'flip', 'grind', 'slide'],
-        'park_terms': ['ramp', 'rail', 'halfpipe', 'street']
-    },
-    'golf': {
-        'positions': ['address position', 'stance'],
-        'techniques': ['drive', 'approach', 'putting'],
-        'equipment': ['clubs', 'golf ball', 'tees'],
-        'actions': ['swing', 'putt', 'chip', 'drive'],
-        'course_terms': ['green', 'fairway', 'bunker', 'rough']
-    },
-    'rugby': {
-        'positions': ['forward', 'back', 'scrum-half'],
-        'techniques': ['passing', 'tackling', 'kicking'],
-        'equipment': ['rugby ball', 'scrum cap', 'mouthguard'],
-        'actions': ['pass', 'tackle', 'ruck', 'maul'],
-        'field_terms': ['try line', 'pitch', 'in-goal area', 'halfway']
-    },
-    'martial arts': {
-        'positions': ['fighting stance', 'guard position'],
-        'techniques': ['strikes', 'kicks', 'grappling'],
-        'equipment': ['gi', 'belt', 'protective gear'],
-        'actions': ['strike', 'block', 'throw', 'grapple'],
-        'mat_terms': ['mat', 'ring', 'dojo', 'training area']
+        'soccer': ['match', 'pitch', 'soccer', 'football', 'kick', 'goal'],
+        'football': ['stadium', 'team', 'touchdown', 'offense', 'quarterback'],
+        'basketball': ['court', 'shot', 'hoop', 'dunk', 'basket'],
+        'tennis': ['court', 'player', 'serve', 'set', 'stroke', 'match point'],
+        'baseball': ['field', 'hit', 'home run', 'pitcher', 'batter'],
+        'swimming': ['pool', 'lane', 'swimmer', 'stroke', 'race'],
+        'volleyball': ['net', 'court', 'spike', 'serve'],
+        'track': ['track', 'race', 'sprinter', 'athlete'],
+        'running': ['race', 'track', 'runner', 'sprint'],
+        'boxing': ['ring', 'boxer', 'punch', 'match', 'bout'],
+        'skiing': ['snow', 'slope', 'skier', 'mountain'],
+        'skating': ['ice', 'skater', 'performance', 'rink'],
+        'surfing': ['wave', 'beach', 'surfer', 'ocean'],
+        'skateboarding': ['skate park', 'skateboarder', 'trick', 'jump'],
+        'golf': ['course', 'club', 'swing', 'golfer', 'hole'],
+        'rugby': ['field', 'tackle', 'player', 'scrum'],
+        'martial arts': ['mat', 'fighter', 'technique', 'match']
     }
-}
+
     # Determine sport type based on name and equipment
     detected_sport = 'unknown'
 
@@ -6052,67 +5524,59 @@ def generate_sports_caption(analysis_result):
 
         subject_phrases.append(random.choice(subject_options))
 
-
     # ----------------- 5. DESCRIBE ACTION -----------------
     if action_quality:
-        # Get the base action description from our previous analysis
-        base_action_desc = action_phrases[-1] if action_phrases else ""
-        
-        # Create sport-specific action options
-        if detected_sport and base_action_desc:
-            if action_quality == 'High':
-                if detected_sport in ['soccer', 'football', 'basketball', 'volleyball']:
-                    action_options = [
-                        f"{base_action_desc}, intensifying during a crucial play",
-                        f"{base_action_desc}, peaking at a decisive moment",
-                        f"{base_action_desc}, executing with exceptional precision",
-                        f"{base_action_desc}, demonstrating elite-level execution"
-                    ]
-                elif detected_sport in ['tennis', 'baseball', 'golf']:
-                    action_options = [
-                        f"{base_action_desc}, achieving perfect technical form",
-                        f"{base_action_desc}, displaying masterful control",
-                        f"{base_action_desc}, executing with pinpoint accuracy",
-                        f"{base_action_desc}, showing expert timing"
-                    ]
-                elif detected_sport in ['skiing', 'snowboarding']:
-                    action_options = [
-                        f"{base_action_desc}, mastering the challenging conditions",
-                        f"{base_action_desc}, maintaining perfect balance",
-                        f"{base_action_desc}, showing exceptional terrain reading",
-                        f"{base_action_desc}, demonstrating advanced technique"
-                    ]
-                elif detected_sport in ['running', 'track', 'swimming']:
-                    action_options = [
-                        f"{base_action_desc}, reaching peak performance",
-                        f"{base_action_desc}, displaying supreme conditioning",
-                        f"{base_action_desc}, maintaining optimal form",
-                        f"{base_action_desc}, showing exceptional endurance"
-                    ]
-                else:
-                    action_options = [
-                        f"{base_action_desc}, reaching athletic excellence",
-                        f"{base_action_desc}, showing professional-level execution",
-                        f"{base_action_desc}, demonstrating superior skill",
-                        f"{base_action_desc}, displaying technical mastery"
-                    ]
-            elif action_quality == 'Medium':
+        if action_quality == 'High':
+            if detected_sport in ['soccer', 'football', 'basketball', 'volleyball']:
                 action_options = [
-                    f"{base_action_desc}, showing good technical execution",
-                    f"{base_action_desc}, maintaining consistent form",
-                    f"{base_action_desc}, displaying solid athleticism",
-                    f"{base_action_desc}, demonstrating proper technique"
+                    "during an intensely competitive play",
+                    "at a crucial moment in the match",
+                    "in a high-stakes game situation",
+                    "executing an advanced technical maneuver",
+                    "during a powerful offensive drive"
+                ]
+            elif detected_sport in ['tennis', 'baseball', 'golf']:
+                action_options = [
+                    "during a perfectly executed swing",
+                    "demonstrating exceptional technique",
+                    "at the critical moment of impact",
+                    "showcasing masterful control",
+                    "with professional athletic form"
+                ]
+            elif detected_sport in ['running', 'track', 'swimming']:
+                action_options = [
+                    "at the moment of breakthrough acceleration",
+                    "displaying extraordinary effort",
+                    "at a decisive point in the race",
+                    "during a powerful acceleration phase",
+                    "with remarkable concentration and form"
                 ]
             else:
                 action_options = [
-                    f"{base_action_desc}, focusing on fundamentals",
-                    f"{base_action_desc}, maintaining basic form",
-                    f"{base_action_desc}, showing controlled movement",
-                    f"{base_action_desc}, executing with care"
+                    "at the peak moment of performance",
+                    "with impressive competitive intensity",
+                    "during a critical action sequence",
+                    "demonstrating professional-level skill",
+                    "in a dynamic display of athleticism"
                 ]
+        elif action_quality == 'Medium':
+            action_options = [
+                "during active competition",
+                "with focused engagement in the event",
+                "amidst the flow of the game",
+                "demonstrating solid technique",
+                "in a noteworthy moment of play"
+            ]
+        else:
+            action_options = [
+                "during a moment of calculated preparation",
+                "in a strategic positioning phase",
+                "during a brief respite in the action",
+                "with focused pre-action concentration",
+                "before initiating the next movement"
+            ]
 
-            # Replace the previous action description with the enhanced version
-            action_phrases[-1] = random.choice(action_options)
+        action_phrases.append(random.choice(action_options))
 
     # ----------------- 6. DESCRIBE EQUIPMENT -----------------
     if equipment:
@@ -6140,6 +5604,71 @@ def generate_sports_caption(analysis_result):
             detail_phrases.append(f"with {eq_list[0]} and {eq_list[1]}")
         elif len(eq_list) > 2:
             detail_phrases.append(f"with {', '.join(eq_list[:-1])}, and {eq_list[-1]}")
+
+    # ----------------- 6.5. DESCRIBE DETECTED ACTIONS -----------------
+    detected_actions = []
+    if 'action_detection' in sports_analysis and sports_analysis['action_detection'].get('detected_actions'):
+        actions = sports_analysis['action_detection']['detected_actions']
+        high_confidence_actions = [a for a in actions if a['confidence'] > 0.7]
+
+        if high_confidence_actions:
+            action_names = [action['action'] for action in high_confidence_actions]
+
+            # Tạo mô tả hành động tự nhiên
+            action_descriptions = {
+                'shooting': ['taking a shot', 'in a shooting motion', 'preparing to shoot'],
+                'pre_kick_stance': ['positioning for a kick', 'in pre-kick stance', 'preparing to strike the ball'],
+                'approach_run': ['approaching the ball', 'in run-up motion', 'building momentum for the kick'],
+                'dribbling': ['dribbling the ball', 'controlling the ball', 'maneuvering with the ball'],
+                'serving': ['serving the ball', 'in a serving position', 'executing a serve'],
+                'forehand': ['executing a forehand stroke', 'in a forehand swing'],
+                'backhand': ['performing a backhand shot', 'in a backhand position'],
+                'classic_spike': ['spiking the ball powerfully', 'in classic attack position'],
+                'power_spike_prep': ['preparing for a power spike', 'winding up for attack'],
+                'double_hand_spike': ['executing a two-handed spike', 'in powerful attack stance'],
+                'quick_attack': ['performing a quick attack', 'in rapid strike position'],
+                'double_block': ['blocking at the net', 'in defensive block position'],
+                'single_block': ['single-hand blocking', 'defending with one arm'],
+                'soft_block': ['soft blocking technique', 'angled defensive position'],
+                'setting': ['setting up teammates', 'in setting position'],
+                'digging': ['digging the ball', 'in defensive receive position'],
+                'sprinting': ['in full sprint', 'sprinting at high speed', 'running dynamically'],
+                'running': ['running', 'in motion', 'moving forward'],
+                # Boxing/Martial Arts
+                'straight_punch': ['throwing a straight punch', 'executing a jab', 'in punching stance'],
+                'left_hook': ['delivering a left hook', 'swinging a hook punch'],
+                'right_hook': ['executing a right hook', 'throwing a power hook'],
+                'uppercut': ['launching an uppercut', 'delivering an uppercut punch'],
+                'body_shot': ['targeting the body', 'executing a body punch'],
+                'defensive_guard': ['in defensive stance', 'maintaining guard position'],
+                'high_kick': ['executing a high kick', 'performing a head kick'],
+                'mid_kick': ['delivering a body kick', 'executing a mid-level kick'],
+
+                # Badminton
+                'badminton_smash': ['smashing the shuttlecock', 'executing a powerful smash'],
+                'clear_shot': ['playing a clear shot', 'hitting a defensive clear'],
+                'drop_shot': ['executing a drop shot', 'playing a delicate drop'],
+                'defensive_ready': ['in defensive ready position', 'prepared for opponent attack'],
+
+                # Golf
+                'golf_backswing': ['in backswing motion', 'preparing the swing'],
+                'golf_impact': ['at impact with the ball', 'striking the ball'],
+                'golf_follow_through': ['completing the swing', 'in follow-through motion'],
+                'putting': ['putting on the green', 'lining up the putt'],
+                'freestyle_stroke': ['performing a freestyle stroke', 'swimming freestyle']
+            }
+
+            for action_name in action_names:
+                if action_name in action_descriptions:
+                    action_phrase = random.choice(action_descriptions[action_name])
+                    detected_actions.append(action_phrase)
+
+            if detected_actions:
+                if len(detected_actions) == 1:
+                    action_phrases.append(detected_actions[0])
+                else:
+                    # Kết hợp nhiều hành động
+                    action_phrases.append(f"{detected_actions[0]} and {detected_actions[1]}")
 
     # ----------------- 7. DESCRIBE EMOTION -----------------
     if facial_analysis and facial_analysis.get('has_faces', False):
@@ -6269,6 +5798,62 @@ def generate_sports_caption(analysis_result):
     return caption
 
 
+def generate_smart_suggestion(analysis_result):
+    """
+    Tạo 1 câu gợi ý thông minh dựa trên kết quả phân tích
+    """
+    # Lấy các thông số từ kết quả phân tích
+    action_level = analysis_result.get('action_analysis', {}).get('action_level', 0)
+    framing_quality = analysis_result.get('composition_analysis', {}).get('framing_quality', 'Unknown')
+    athletes_count = analysis_result.get('detections', {}).get('athletes', 0)
+    sport_type = analysis_result.get('composition_analysis', {}).get('sport_type', 'Unknown')
+
+    # Tính điểm sharpness trung bình nếu có
+    avg_sharpness = 0
+    if 'sports_analysis' in analysis_result and 'sharpness_scores' in analysis_result['sports_analysis']:
+        sharpness_scores = analysis_result['sports_analysis']['sharpness_scores']
+        if sharpness_scores:
+            avg_sharpness = sum(sharpness_scores) / len(sharpness_scores)
+
+    # Kiểm tra có emotion không
+    has_emotion = analysis_result.get('facial_analysis', {}).get('has_faces', False)
+    emotion_intensity = analysis_result.get('facial_analysis', {}).get('emotion_intensity', 0) if has_emotion else 0
+
+    # Ưu tiên theo mức độ quan trọng
+    # 1. Action level thấp
+    if action_level < 0.4:
+        return "Try capturing during peak action moments for more dynamic sports photography."
+
+    # 2. Framing kém
+    if framing_quality in ['Poor', 'Could be improved', 'Fair']:
+        return "Apply the rule of thirds and ensure subjects are well-positioned in the frame."
+
+    # 3. Sharpness thấp
+    if avg_sharpness < 0.5:
+        return "Use faster shutter speed and proper focus to achieve sharper subject details."
+
+    # 4. Không có emotion
+    if not has_emotion and athletes_count > 0:
+        return "Consider angles that capture athlete expressions for more engaging storytelling."
+
+    # 5. Emotion tốt
+    if has_emotion and emotion_intensity > 0.7:
+        return "Excellent emotional capture! This adds great storytelling value to your sports photo."
+
+    # 6. Action tốt nhưng có thể cải thiện khác
+    if action_level > 0.7 and avg_sharpness > 0.6:
+        return "Great action shot! Consider varying angles or including more context for visual variety."
+
+    # 7. Suggestion chung theo môn thể thao
+    if sport_type.lower() in ['soccer', 'football', 'basketball']:
+        return "For team sports, try capturing player interactions and tactical moments."
+    elif sport_type.lower() in ['tennis', 'golf', 'athletics']:
+        return "Focus on technique and form - these sports offer great opportunities for skill showcase."
+
+    # 8. Default suggestion
+    return "Solid sports photography! Experiment with different perspectives to add creative flair."
+
+
 def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Sports Image Analysis')
@@ -6294,6 +5879,8 @@ def main():
     analysis = analyze_sports_image(image_path)
     print("Analysis complete. Results saved to sports_analysis_results.png and analysis_results.txt")
     return analysis
+
+
 
 
 if __name__ == "__main__":
