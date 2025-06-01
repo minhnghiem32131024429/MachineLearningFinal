@@ -1202,7 +1202,6 @@ def analyze_sports_environment(img_data, depth_map=None):
 
     return env_results
 
-
 def detect_human_pose(img_data, conf_threshold=0.15, main_subject_box=None):
     print("DEBUG - Bắt đầu phát hiện pose")
     """
@@ -1282,21 +1281,81 @@ def detect_human_pose(img_data, conf_threshold=0.15, main_subject_box=None):
     print(f"DEBUG - pose_results có số poses: {len(pose_results.get('poses', []))}")
     return pose_results
 
-
-def detect_sports_actions(pose_data, sport_type, image_shape):
+def detect_sports_actions(pose_data, sport_type, image_shape, detected_equipment=None, environment_sport=None):
     """
-    Phát hiện hành động thể thao cụ thể dựa trên pose keypoints
+    Phát hiện hành động thể thao cụ thể dựa trên pose keypoints với equipment filtering
 
     Args:
         pose_data: Dữ liệu pose từ detect_human_pose
         sport_type: Loại thể thao được phát hiện
         image_shape: Kích thước ảnh (height, width)
+        detected_equipment: List các equipment đã phát hiện
+        environment_sport: Sport type từ environment analysis
 
     Returns:
         Dict: Thông tin về hành động được phát hiện
     """
     if not pose_data or 'poses' not in pose_data or not pose_data['poses']:
         return {'detected_actions': [], 'confidence': 0.0, 'details': 'No pose data available'}
+    # EQUIPMENT FILTERING LOGIC
+    equipment_to_sport = {
+        'tennis racket': 'tennis',
+        'tennis ball': 'tennis',
+        'soccer ball': 'soccer',
+        'basketball': 'basketball',
+        'volleyball': 'volleyball',
+        'baseball bat': 'baseball',
+        'baseball glove': 'baseball',
+        'baseball': 'baseball',
+        'american football': 'football',
+        'golf ball': 'golf',
+        'golf club': 'golf',
+        'boxing gloves': 'boxing',
+        'ping pong ball': 'table tennis',
+        'badminton racket': 'badminton',
+        'skis': 'skiing',
+        'snowboard': 'snowboarding',
+        'surfboard': 'surfing',
+        'skateboard': 'skateboarding',
+        'frisbee': 'frisbee'
+    }
+
+    # Xác định sport từ equipment
+    equipment_detected_sport = None
+    if detected_equipment:
+        for equipment in detected_equipment:
+            if equipment.lower() in equipment_to_sport:
+                equipment_detected_sport = equipment_to_sport[equipment.lower()]
+                print(f"Equipment-based sport detection: {equipment} -> {equipment_detected_sport}")
+                break
+
+    # Kiểm tra swimming từ environment (đặc biệt)
+    is_swimming_environment = False
+    if environment_sport and 'swimming' in environment_sport.lower():
+        is_swimming_environment = True
+        print("Swimming detected from environment analysis")
+
+    # FILTERING RULES - SỬA LẠI:
+    # 1. Nếu có equipment, chỉ detect action của sport đó
+    # 2. Nếu environment detect swimming, thêm swimming vào allowed
+    # 3. Nếu không có equipment, cho phép sports không cần equipment + swimming nếu có
+
+    allowed_sports = []
+
+    if equipment_detected_sport:
+        # Chỉ cho phép sport từ equipment
+        allowed_sports = [equipment_detected_sport]
+        # NHƯNG vẫn cho phép swimming nếu environment detect
+        if is_swimming_environment:
+            allowed_sports.append('swimming')
+        print(f"Action detection limited to: {allowed_sports}")
+    else:
+        # Không có equipment - cho phép sports không cần equipment cụ thể
+        allowed_sports = ['soccer', 'basketball', 'volleyball', 'running', 'track', 'boxing', 'martial arts']
+        # LUÔN LUÔN thêm swimming nếu environment detect
+        if is_swimming_environment:
+            allowed_sports.append('swimming')
+        print(f"No equipment detected - allowed sports: {allowed_sports}")
 
     height, width = image_shape[:2]
     detected_actions = []
@@ -1392,7 +1451,7 @@ def detect_sports_actions(pose_data, sport_type, image_shape):
     sport_lower = sport_type.lower()
 
     # ==================== BÓNG ĐÁ (SOCCER) ====================
-    if 'soccer' in sport_lower or 'football' in sport_lower:
+    if ('soccer' in sport_lower or 'football' in sport_lower) and 'soccer' in allowed_sports:
         action_confidence = 0.0
 
         # 1. PRE-KICK STANCE - Tư thế chuẩn bị đá bóng
@@ -1584,7 +1643,7 @@ def detect_sports_actions(pose_data, sport_type, image_shape):
             })
 
     # ==================== BÓNG RỔ (BASKETBALL) ====================
-    elif 'basketball' in sport_lower:
+    elif 'basketball' in sport_lower and 'basketball' in allowed_sports:
         action_confidence = 0.0
 
         # 1. SHOOTING - Tay nâng cao, khuỷu tay gấp
@@ -1642,7 +1701,7 @@ def detect_sports_actions(pose_data, sport_type, image_shape):
                 })
 
     # ==================== TENNIS ====================
-    elif 'tennis' in sport_lower:
+    elif 'tennis' in sport_lower and 'tennis' in allowed_sports:
         action_confidence = 0.0
 
         # 1. SERVING - Một tay nâng cao (lempar bóng), tay kia chuẩn bị đánh
@@ -1695,7 +1754,7 @@ def detect_sports_actions(pose_data, sport_type, image_shape):
                 })
 
     # ==================== BÓNG CHUYỀN (VOLLEYBALL) ====================
-    elif 'volleyball' in sport_lower:
+    elif 'volleyball' in sport_lower and 'volleyball' in allowed_sports:
         action_confidence = 0.0
 
         # 1. SPIKING - Nhiều biến thể tư thế tay
@@ -1907,11 +1966,12 @@ def detect_sports_actions(pose_data, sport_type, image_shape):
             })
 
     # ==================== BOXING/MARTIAL ARTS ====================
-    elif any(sport in sport_lower for sport in ['boxing', 'martial arts', 'mma', 'karate', 'taekwondo']):
+    elif (any(sport in sport_lower for sport in ['boxing', 'martial arts', 'mma', 'karate', 'taekwondo']) and
+          any(sport in allowed_sports for sport in ['boxing', 'martial arts'])):
         action_confidence = 0.0
 
-        # 1. PUNCHING - Đấm thẳng, móc, uppercut
-        def detect_punching():
+        # 1. PUNCHING - Cải thiện detection logic
+        def detect_punching_improved():
             confidence = 0.0
             details = []
             punch_type = "unknown"
@@ -1926,25 +1986,27 @@ def detect_sports_actions(pose_data, sport_type, image_shape):
                 left_shoulder = kp_dict[5]
                 right_shoulder = kp_dict[6]
 
-                # Tính khoảng cách tay đến vai (extended punch)
+                # CẢI THIỆN 1: Giảm ngưỡng extension ratio
+                shoulder_width = abs(left_shoulder['x'] - right_shoulder['x'])
                 left_extension = abs(left_wrist['x'] - left_shoulder['x'])
                 right_extension = abs(right_wrist['x'] - right_shoulder['x'])
-                shoulder_width = abs(left_shoulder['x'] - right_shoulder['x'])
+
+                # GIẢM NGƯỠNG từ 0.8 xuống 0.5
+                left_extended = left_extension > shoulder_width * 0.5
+                right_extended = right_extension > shoulder_width * 0.5
+
+                # CẢI THIỆN 2: Kiểm tra độ cao tay (boxing stance)
+                avg_shoulder_y = (left_shoulder['y'] + right_shoulder['y']) / 2
+                left_hand_elevated = left_wrist['y'] < avg_shoulder_y + height * 0.15  # Tay ở mức vai hoặc cao hơn
+                right_hand_elevated = right_wrist['y'] < avg_shoulder_y + height * 0.15
 
                 # STRAIGHT PUNCH - Tay duỗi thẳng ra
-                if left_extension > shoulder_width * 0.8 or right_extension > shoulder_width * 0.8:
-                    # Kiểm tra tay nào đang đấm
-                    punching_hand = "left" if left_extension > right_extension else "right"
+                if left_extended or right_extended:
+                    punching_hand = "left" if left_extended else "right"
+                    punch_height = left_wrist['y'] if left_extended else right_wrist['y']
+                    shoulder_height = left_shoulder['y'] if left_extended else right_shoulder['y']
 
-                    # Kiểm tra độ cao (jab vs body shot)
-                    if punching_hand == "left":
-                        punch_height = left_wrist['y']
-                        shoulder_height = left_shoulder['y']
-                    else:
-                        punch_height = right_wrist['y']
-                        shoulder_height = right_shoulder['y']
-
-                    if abs(punch_height - shoulder_height) < height * 0.1:
+                    if abs(punch_height - shoulder_height) < height * 0.15:  # Tăng tolerance
                         punch_type = "straight_punch"
                         confidence = 0.85
                         details.append(f"{punching_hand} straight punch at head level")
@@ -1953,24 +2015,41 @@ def detect_sports_actions(pose_data, sport_type, image_shape):
                         confidence = 0.8
                         details.append(f"{punching_hand} body shot")
 
-                # HOOK PUNCH - Tay cong, khuỷu tay gấp
-                elif not (left_extension > shoulder_width * 0.8 or right_extension > shoulder_width * 0.8):
+                # CẢI THIỆN 3: HOOK PUNCH - Giảm yêu cầu góc khuỷu
+                elif not (left_extended or right_extended):
                     left_elbow_angle = calculate_angle(left_shoulder, left_elbow, left_wrist)
                     right_elbow_angle = calculate_angle(right_shoulder, right_elbow, right_wrist)
 
-                    # Hook có góc khuỷu 60-90 độ
-                    if 60 <= left_elbow_angle <= 90:
+                    # GIẢM YÊU CẦU từ 60-90 xuống 45-110
+                    if 45 <= left_elbow_angle <= 110 and left_hand_elevated:
                         punch_type = "left_hook"
                         confidence = 0.8
                         details.append(f"Left hook with {left_elbow_angle:.1f}° elbow angle")
-                    elif 60 <= right_elbow_angle <= 90:
+                    elif 45 <= right_elbow_angle <= 110 and right_hand_elevated:
                         punch_type = "right_hook"
                         confidence = 0.8
                         details.append(f"Right hook with {right_elbow_angle:.1f}° elbow angle")
 
-                # UPPERCUT - Tay từ dưới lên
+                # CẢI THIỆN 4: BOXING STANCE DETECTION (mới)
                 if confidence == 0.0:
-                    avg_shoulder_y = (left_shoulder['y'] + right_shoulder['y']) / 2
+                    # Kiểm tra tư thế boxing cơ bản (cả 2 tay nâng lên)
+                    both_hands_up = left_hand_elevated and right_hand_elevated
+
+                    if both_hands_up:
+                        # Kiểm tra khoảng cách tay (boxing guard)
+                        hand_distance = abs(left_wrist['x'] - right_wrist['x'])
+
+                        if hand_distance > shoulder_width * 0.3:  # Tay rộng ra
+                            punch_type = "boxing_stance"
+                            confidence = 0.7
+                            details.append("Active boxing stance with hands up")
+                        else:
+                            punch_type = "defensive_guard"
+                            confidence = 0.75
+                            details.append("Tight defensive guard position")
+
+                # CẢI THIỆN 5: UPPERCUT - Mở rộng detection
+                if confidence == 0.0:
                     left_rising = left_wrist['y'] < avg_shoulder_y and left_elbow['y'] > left_wrist['y']
                     right_rising = right_wrist['y'] < avg_shoulder_y and right_elbow['y'] > right_wrist['y']
 
@@ -1982,8 +2061,8 @@ def detect_sports_actions(pose_data, sport_type, image_shape):
 
             return confidence, punch_type, details
 
-        # 2. DEFENSIVE GUARD - Tay che mặt
-        def detect_guard():
+        # 2. DEFENSIVE GUARD - Cải thiện
+        def detect_guard_improved():
             confidence = 0.0
             details = []
 
@@ -1995,77 +2074,72 @@ def detect_sports_actions(pose_data, sport_type, image_shape):
 
                 avg_shoulder_y = (left_shoulder['y'] + right_shoulder['y']) / 2
 
-                # Cả hai tay ở mức vai hoặc cao hơn
-                hands_up = (left_wrist['y'] <= avg_shoulder_y + height * 0.05 and
-                            right_wrist['y'] <= avg_shoulder_y + height * 0.05)
+                # GIẢM YÊU CẦU - tay ở mức vai hoặc hơi cao hơn
+                hands_up = (left_wrist['y'] <= avg_shoulder_y + height * 0.1 and
+                            right_wrist['y'] <= avg_shoulder_y + height * 0.1)
 
-                # Tay gần người (defensive position)
+                # TĂNG TOLERANCE cho khoảng cách tay
                 shoulder_center_x = (left_shoulder['x'] + right_shoulder['x']) / 2
-                hands_close = (abs(left_wrist['x'] - shoulder_center_x) < width * 0.15 and
-                               abs(right_wrist['x'] - shoulder_center_x) < width * 0.15)
+                hands_close = (abs(left_wrist['x'] - shoulder_center_x) < width * 0.25 and
+                               abs(right_wrist['x'] - shoulder_center_x) < width * 0.25)
 
                 if hands_up and hands_close:
                     confidence = 0.8
                     details.append("Defensive guard position with hands up")
+                elif hands_up:  # Chỉ cần tay nâng lên
+                    confidence = 0.6
+                    details.append("Hands elevated in fighting position")
 
             return confidence, details
 
-        # 3. KICKING (Taekwondo/MMA) - Chân nâng cao
-        def detect_kicking():
+        # 3. AGGRESSIVE STANCE - Mới thêm
+        def detect_aggressive_stance():
             confidence = 0.0
             details = []
-            kick_type = "unknown"
 
-            if (13 in kp_dict and 14 in kp_dict and 15 in kp_dict and 16 in kp_dict and
+            if (9 in kp_dict and 10 in kp_dict and 5 in kp_dict and 6 in kp_dict and
                     11 in kp_dict and 12 in kp_dict):
 
-                left_knee = kp_dict[13]
-                right_knee = kp_dict[14]
-                left_ankle = kp_dict[15]
-                right_ankle = kp_dict[16]
+                left_wrist = kp_dict[9]
+                right_wrist = kp_dict[10]
+                left_shoulder = kp_dict[5]
+                right_shoulder = kp_dict[6]
                 left_hip = kp_dict[11]
                 right_hip = kp_dict[12]
 
-                avg_hip_y = (left_hip['y'] + right_hip['y']) / 2
+                # Kiểm tra tư thế tấn công (1 tay xa, 1 tay gần)
+                shoulder_center_x = (left_shoulder['x'] + right_shoulder['x']) / 2
+                left_distance = abs(left_wrist['x'] - shoulder_center_x)
+                right_distance = abs(right_wrist['x'] - shoulder_center_x)
 
-                # HIGH KICK - Chân nâng cao hơn hông
-                left_high_kick = left_knee['y'] < avg_hip_y and left_ankle['y'] < avg_hip_y
-                right_high_kick = right_knee['y'] < avg_hip_y and right_ankle['y'] < avg_hip_y
+                # Một tay xa, một tay gần
+                distance_diff = abs(left_distance - right_distance)
 
-                if left_high_kick or right_high_kick:
-                    kicking_leg = "left" if left_high_kick else "right"
+                if distance_diff > width * 0.15:  # Chênh lệch đáng kể
+                    # Kiểm tra cơ thể có nghiêng về phía trước không
+                    avg_shoulder_y = (left_shoulder['y'] + right_shoulder['y']) / 2
+                    avg_hip_y = (left_hip['y'] + right_hip['y']) / 2
 
-                    # Xác định loại kick dựa trên hướng
-                    if kicking_leg == "left":
-                        kick_height = left_ankle['y']
-                        if kick_height < avg_hip_y - height * 0.2:
-                            kick_type = "high_kick"
-                            confidence = 0.85
-                        else:
-                            kick_type = "mid_kick"
-                            confidence = 0.8
+                    forward_lean = avg_shoulder_y < avg_hip_y - height * 0.05
+
+                    if forward_lean:
+                        confidence = 0.75
+                        details.append("Aggressive forward stance detected")
                     else:
-                        kick_height = right_ankle['y']
-                        if kick_height < avg_hip_y - height * 0.2:
-                            kick_type = "high_kick"
-                            confidence = 0.85
-                        else:
-                            kick_type = "mid_kick"
-                            confidence = 0.8
+                        confidence = 0.65
+                        details.append("Asymmetric hand position suggesting attack")
 
-                    details.append(f"{kicking_leg} {kick_type} execution")
-
-            return confidence, kick_type, details
+            return confidence, details
 
         # Chạy tất cả detections
-        punch_conf, punch_type, punch_details = detect_punching()
-        guard_conf, guard_details = detect_guard()
-        kick_conf, kick_type, kick_details = detect_kicking()
+        punch_conf, punch_type, punch_details = detect_punching_improved()
+        guard_conf, guard_details = detect_guard_improved()
+        aggressive_conf, aggressive_details = detect_aggressive_stance()
 
         # Ưu tiên theo confidence
-        max_conf = max(punch_conf, guard_conf, kick_conf)
+        max_conf = max(punch_conf, guard_conf, aggressive_conf)
 
-        if max_conf == punch_conf and punch_conf > 0.6:
+        if max_conf == punch_conf and punch_conf > 0.5:
             action_confidence = punch_conf
             detected_actions.append({
                 'action': punch_type,
@@ -2073,13 +2147,13 @@ def detect_sports_actions(pose_data, sport_type, image_shape):
                 'details': '; '.join(punch_details),
                 'body_part': 'arms'
             })
-        elif max_conf == kick_conf and kick_conf > 0.6:
-            action_confidence = kick_conf
+        elif max_conf == aggressive_conf and aggressive_conf > 0.5:
+            action_confidence = aggressive_conf
             detected_actions.append({
-                'action': kick_type,
-                'confidence': kick_conf,
-                'details': '; '.join(kick_details),
-                'body_part': 'legs'
+                'action': 'aggressive_stance',
+                'confidence': aggressive_conf,
+                'details': '; '.join(aggressive_details),
+                'body_part': 'full_body'
             })
         elif max_conf == guard_conf and guard_conf > 0.5:
             action_confidence = guard_conf
@@ -2092,7 +2166,8 @@ def detect_sports_actions(pose_data, sport_type, image_shape):
 
 
     # ==================== CHẠY/ĐIỀN KINH (RUNNING/TRACK) ====================
-    elif any(sport in sport_lower for sport in ['running', 'track', 'sprint', 'marathon']):
+    elif (any(sport in sport_lower for sport in ['running', 'track', 'sprint', 'marathon']) and
+          any(sport in allowed_sports for sport in ['running', 'track'])):
         action_confidence = 0.0
 
         # 1. SPRINTING - Chân nâng cao, tay vung mạnh
@@ -2131,7 +2206,7 @@ def detect_sports_actions(pose_data, sport_type, image_shape):
                 })
 
     # ==================== CẦU LÔNG (BADMINTON) ====================
-    elif 'badminton' in sport_lower:
+    elif 'badminton' in sport_lower and 'badminton' in allowed_sports:
         action_confidence = 0.0
 
         # 1. SMASH - Tay nâng cao, chuẩn bị đập mạnh
@@ -2270,7 +2345,7 @@ def detect_sports_actions(pose_data, sport_type, image_shape):
             })
 
     # ==================== GOLF ====================
-    elif 'golf' in sport_lower:
+    elif 'golf' in sport_lower and 'golf' in allowed_sports:
         action_confidence = 0.0
 
         # 1. BACKSWING - Tay vung lên cao về phía sau
@@ -2422,7 +2497,10 @@ def detect_sports_actions(pose_data, sport_type, image_shape):
 
 
     # ==================== BƠI LỘI (SWIMMING) ====================
-    elif 'swimming' in sport_lower:
+    elif 'swimming' in sport_lower and 'swimming' in allowed_sports:
+        print(f"SWIMMING DEBUG - sport_lower: {sport_lower}, allowed_sports: {allowed_sports}")
+        print(f"Environment sport: {environment_sport}, is_swimming_environment: {is_swimming_environment}")
+        print(f"Available keypoints: {list(kp_dict.keys())}")
         action_confidence = 0.0
 
         # FREESTYLE STROKE - Một tay duỗi về phía trước
@@ -2502,31 +2580,13 @@ def detect_sports_actions(pose_data, sport_type, image_shape):
     }
 
 def segment_main_subject(img, yolo_seg, main_subject_box):
-    """
-    Phân đoạn main subject bằng cách so sánh box với masks từ YOLOv8-seg
-
-    Args:
-        img: Ảnh cần phân tích (numpy array)
-        yolo_seg: Model YOLOv8-seg đã load
-        main_subject_box: Bounding box của main subject [x1, y1, x2, y2]
-
-    Returns:
-        mask: Numpy array chứa mask của main subject hoặc None nếu không tìm thấy
-    """
-    # Chạy YOLOv8-seg để lấy masks
     results = yolo_seg(img)
-
     best_mask = None
     best_iou = 0
-
-    # Kiểm tra các kết quả
     for result in results:
         if hasattr(result, 'masks') and result.masks is not None:
             for i, mask in enumerate(result.masks.data):
-                # Lấy bbox tương ứng với mask
                 box = result.boxes.xyxy[i].cpu().numpy()
-
-                # Tính IoU giữa box của mask và main_subject_box
                 x1 = max(box[0], main_subject_box[0])
                 y1 = max(box[1], main_subject_box[1])
                 x2 = min(box[2], main_subject_box[2])
@@ -2555,31 +2615,21 @@ def segment_main_subject(img, yolo_seg, main_subject_box):
 
 
 def analyze_sports_composition(detections, analysis, img_data):
-    """Analyze the composition with sports-specific context"""
-
-    # Basic composition from existing analysis
     analysis["composition_analysis"] if "composition_analysis" in analysis else {}
-
-    # Phân tích môi trường thể thao
     depth_map = None
     if 'depth_map' in analysis:
         depth_map = analysis['depth_map']
 
     env_analysis = analyze_sports_environment(img_data, depth_map)
-
-    # Sports specific enhancements
     result = {
-        'sport_type': 'Unknown',  # Thay đổi từ 'Running' thành 'Unknown'
+        'sport_type': 'Unknown',
         'framing_quality': 'Unknown',
         'recommended_crop': None,
         'action_focus': 'Unknown'
     }
-
-    # MAPPING CHỈ CÁC ĐỐI TƯỢNG YOLO THỰC + CLIP BALL CLASSIFICATION
     sport_equipment = {
         # Đối tượng YOLO cơ bản
         'tennis racket': 'Tennis',
-        # Thêm sports equipment mới
         'boxing gloves': 'Boxing',
         'golf club': 'Golf',
         'badminton racket': 'Badminton',
@@ -2723,26 +2773,47 @@ def analyze_sports_composition(detections, analysis, img_data):
                             detected_sport_from_action = 'Basketball'
                         else:
                             detected_sport_from_action = 'Soccer'  # Default
-    # Quyết định cuối cùng về môn thể thao (ƯU TIÊN ACTION DETECTION)
+    # Quyết định cuối cùng về môn thể thao (ƯU TIÊN: EQUIPMENT -> ENVIRONMENT -> ACTION)
     decision_log = []
 
-    if detected_sport_from_action and action_confidence > 0.6:
-        result['sport_type'] = detected_sport_from_action
-        decision_log.append(f"Action detection: {detected_sport_from_action} ({action_confidence:.2f})")
-    elif detected_sport and equipment_confidence > env_confidence:
+    # PRIORITY 1: Equipment detection (cao nhất)
+    if detected_sport and equipment_confidence > 0.6:
         result['sport_type'] = detected_sport
         decision_log.append(f"Equipment detection: {detected_sport} ({equipment_confidence:.2f})")
+
+    # PRIORITY 2: Environment detection (đặc biệt cho swimming)
     elif detected_sport_from_env and env_confidence > 0.8:
         result['sport_type'] = detected_sport_from_env
         decision_log.append(f"Environment detection: {detected_sport_from_env} ({env_confidence:.2f})")
-    elif detected_sport_from_action and action_confidence > 0.4:  # Fallback với threshold thấp hơn
+
+    # PRIORITY 3: Action detection (chỉ khi không có equipment)
+    elif detected_sport_from_action and action_confidence > 0.6:
+        result['sport_type'] = detected_sport_from_action
+        decision_log.append(f"Action detection: {detected_sport_from_action} ({action_confidence:.2f})")
+
+    # FALLBACKS
+    elif detected_sport and equipment_confidence > 0.4:  # Equipment fallback
+        result['sport_type'] = detected_sport
+        decision_log.append(f"Equipment detection (fallback): {detected_sport} ({equipment_confidence:.2f})")
+    elif detected_sport_from_env and env_confidence > 0.5:  # Environment fallback
+        result['sport_type'] = detected_sport_from_env
+        decision_log.append(f"Environment detection (fallback): {detected_sport_from_env} ({env_confidence:.2f})")
+    elif detected_sport_from_action and action_confidence > 0.4:  # Action fallback
         result['sport_type'] = detected_sport_from_action
         decision_log.append(f"Action detection (fallback): {detected_sport_from_action} ({action_confidence:.2f})")
     else:
-        result['sport_type'] = 'Running'  # Cuối cùng mới default về Running
+        result['sport_type'] = 'Running'  # Default cuối cùng
         decision_log.append("Default: Running")
 
     print(f"Sport type decision: {' -> '.join(decision_log)}")
+
+    # Debug equipment vs action relationship
+    if detected_sport:
+        print(f"Equipment detected: {detected_sport} (confidence: {equipment_confidence:.2f})")
+    if detected_sport_from_action:
+        print(f"Action-based sport: {detected_sport_from_action} (confidence: {action_confidence:.2f})")
+    if detected_sport_from_env:
+        print(f"Environment-based sport: {detected_sport_from_env} (confidence: {env_confidence:.2f})")
 
     # Lưu thông tin phân tích môi trường
     result['environment_analysis'] = env_analysis
@@ -5024,10 +5095,28 @@ def analyze_sports_image(file_path):
     sports_analysis['pose_analysis'] = pose_results
     print(f"DEBUG B - sports_analysis sau khi gán pose: {sports_analysis.keys()}")
 
-    # Step 6.6: PHÁT HIỆN HÀNH ĐỘNG THỂ THAO
-    print("Detecting sports actions...")
+    # Step 6.6: PHÁT HIỆN HÀNH ĐỘNG THỂ THAO VỚI EQUIPMENT FILTERING
+    print("Detecting sports actions with equipment filtering...")
     sport_type = composition_analysis.get('sport_type', 'Unknown')
-    action_detection_results = detect_sports_actions(pose_results, sport_type, img_data['resized_array'].shape)
+
+    # Lấy equipment đã detect
+    detected_equipment = action_analysis.get('equipment_types', [])
+
+    # Lấy environment sport analysis
+    environment_sport = None
+    if 'environment_analysis' in composition_analysis and 'sport_probabilities' in composition_analysis[
+        'environment_analysis']:
+        env_sports = composition_analysis['environment_analysis']['sport_probabilities']
+        if env_sports:
+            environment_sport = max(env_sports.items(), key=lambda x: x[1])[0]
+
+    action_detection_results = detect_sports_actions(
+        pose_results,
+        sport_type,
+        img_data['resized_array'].shape,
+        detected_equipment=detected_equipment,
+        environment_sport=environment_sport
+    )
 
     # Cập nhật sports_analysis với action detection
     sports_analysis['action_detection'] = action_detection_results
