@@ -2891,18 +2891,37 @@ def analyze_sports_composition(detections, analysis, img_data):
     # Quyết định cuối cùng về môn thể thao (ƯU TIÊN EQUIPMENT DETECTION)
     decision_log = []
 
+    # Đảm bảo tất cả sport types không phải None
+    if detected_sport is None:
+        detected_sport = ""
+    if detected_sport_from_action is None:
+        detected_sport_from_action = ""
+    if detected_sport_from_env is None:
+        detected_sport_from_env = ""
+
     # ƯU TIÊN 1: Equipment detection với confidence cao
     if detected_sport and equipment_confidence >= 0.7:
         result['sport_type'] = detected_sport
         decision_log.append(f"Equipment detection (HIGH): {detected_sport} ({equipment_confidence:.2f})")
-    # ƯU TIÊN 2: Action detection với confidence rất cao
-    elif detected_sport_from_action and action_confidence > 0.8:
+
+    # ƯU TIÊN 2: Action detection cho các môn không equipment (BOXING, RUNNING, etc.)
+    elif detected_sport_from_action and action_confidence >= 0.6:
         result['sport_type'] = detected_sport_from_action
-        decision_log.append(f"Action detection (VERY HIGH): {detected_sport_from_action} ({action_confidence:.2f})")
-    # ƯU TIÊN 3: Equipment detection với confidence trung bình nhưng vẫn cao hơn action/env
-    elif detected_sport and equipment_confidence > max(action_confidence, env_confidence):
+        decision_log.append(f"Action detection (HIGH): {detected_sport_from_action} ({action_confidence:.2f})")
+    # ƯU TIÊN 3: Environment detection với confidence cao
+    elif detected_sport_from_env and env_confidence >= 0.8:
+        result['sport_type'] = detected_sport_from_env
+        decision_log.append(f"Environment detection (HIGH): {detected_sport_from_env} ({env_confidence:.2f})")
+
+    # ƯU TIÊN 4: Equipment detection với confidence trung bình
+    elif detected_sport and equipment_confidence >= 0.5:
         result['sport_type'] = detected_sport
-        decision_log.append(f"Equipment detection: {detected_sport} ({equipment_confidence:.2f})")
+        decision_log.append(f"Equipment detection (MEDIUM): {detected_sport} ({equipment_confidence:.2f})")
+
+    # ƯU TIÊN 5: Action detection với confidence trung bình
+    elif detected_sport_from_action and action_confidence >= 0.5:
+        result['sport_type'] = detected_sport_from_action
+        decision_log.append(f"Action detection (MEDIUM): {detected_sport_from_action} ({action_confidence:.2f})")
     # ƯU TIÊN 4: Action detection với confidence cao
     elif detected_sport_from_action and action_confidence > 0.6:
         result['sport_type'] = detected_sport_from_action
@@ -2918,6 +2937,10 @@ def analyze_sports_composition(detections, analysis, img_data):
     else:
         result['sport_type'] = 'Running'  # Cuối cùng mới default về Running
         decision_log.append("Default: Running")
+
+    # Đảm bảo sport_type không bao giờ là None
+    if result.get('sport_type') is None:
+        result['sport_type'] = 'Running'
 
     print(f"Sport type decision: {' -> '.join(decision_log)}")
 
