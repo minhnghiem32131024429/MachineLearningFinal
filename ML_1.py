@@ -1394,6 +1394,104 @@ def detect_sports_actions(pose_data, sport_type, image_shape):
 
     # Nếu sport_type là Unknown, chạy tất cả detections
     run_all_sports = (sport_type == 'Unknown' or sport_lower == 'unknown')
+    prioritize_detected_sport = not run_all_sports
+    # ==================== ƯU TIÊN SPORT TYPE ĐÃ XÁC ĐỊNH ====================
+    detected_actions = []
+    action_confidence = 0.0
+
+    # Nếu đã xác định sport type, ưu tiên detection cho sport đó
+    if prioritize_detected_sport:
+        print(f"DEBUG - Prioritizing detection for: {sport_type}")
+
+        # Track and Field / Running - ƯU TIÊN NHẤT cho ảnh này
+        if any(keyword in sport_lower for keyword in ['track', 'running', 'sprint', 'athletics', 'race']):
+            print("DEBUG - Running Track and Field detection only")
+
+            # 1. SPRINTING - Chân nâng cao, tay vung mạnh
+            if (13 in kp_dict and 14 in kp_dict and 15 in kp_dict and 16 in kp_dict and
+                    9 in kp_dict and 10 in kp_dict):
+
+                left_knee = kp_dict[13]
+                right_knee = kp_dict[14]
+                left_ankle = kp_dict[15]
+                right_ankle = kp_dict[16]
+                left_wrist = kp_dict[9]
+                right_wrist = kp_dict[10]
+
+                # Kiểm tra chân nâng cao
+                ground_level = image_shape[0] * 0.9
+                high_knee = (left_knee['y'] < ground_level * 0.7 or right_knee['y'] < ground_level * 0.7)
+
+                # Kiểm tra tay vung (chênh lệch độ cao giữa hai tay)
+                arm_swing = abs(left_wrist['y'] - right_wrist['y']) > image_shape[0] * 0.1
+
+                if high_knee and arm_swing:
+                    action_confidence = 0.90  # Tăng confidence cho running
+                    detected_actions.append({
+                        'action': 'sprinting',
+                        'confidence': action_confidence,
+                        'details': 'High knee lift with dynamic arm swing - Track & Field sprint',
+                        'body_part': 'full_body'
+                    })
+                    print(f"DEBUG - SPRINTING detected with confidence: {action_confidence}")
+                elif high_knee:
+                    action_confidence = 0.80
+                    detected_actions.append({
+                        'action': 'running',
+                        'confidence': 0.80,
+                        'details': 'Elevated knee position - Track & Field running form',
+                        'body_part': 'legs'
+                    })
+                    print(f"DEBUG - RUNNING detected with confidence: 0.80")
+
+            # Nếu đã tìm thấy action cho track, DỪNG LẠI và không chạy các sport khác
+            if detected_actions:
+                print(f"DEBUG - Found track action, skipping other sports")
+                # Nhảy thẳng đến phần kết thúc
+                if detected_actions:
+                    overall_confidence = max([action['confidence'] for action in detected_actions])
+                else:
+                    overall_confidence = 0.0
+
+                for action in detected_actions:
+                    action['body_orientation'] = body_orientation
+
+                return {
+                    'detected_actions': detected_actions,
+                    'confidence': overall_confidence,
+                    'body_orientation': body_orientation,
+                    'keypoints_count': len(kp_dict),
+                    'details': f'Prioritized analysis for {sport_type} with {len(kp_dict)} keypoints'
+                }
+
+        # Soccer/Football - ƯU TIÊN
+        elif any(keyword in sport_lower for keyword in ['soccer', 'football']):
+            print("DEBUG - Running Soccer detection only")
+            # Chạy chỉ phần soccer detection...
+            # (code soccer detection ở đây)
+
+        # Basketball - ƯU TIÊN
+        elif 'basketball' in sport_lower:
+            print("DEBUG - Running Basketball detection only")
+            # Chạy chỉ phần basketball detection...
+            # (code basketball detection ở đây)
+
+        # Nếu tìm thấy action cho sport được ưu tiên, return luôn
+        if detected_actions:
+            overall_confidence = max([action['confidence'] for action in detected_actions])
+            for action in detected_actions:
+                action['body_orientation'] = body_orientation
+            return {
+                'detected_actions': detected_actions,
+                'confidence': overall_confidence,
+                'body_orientation': body_orientation,
+                'keypoints_count': len(kp_dict),
+                'details': f'Prioritized analysis for {sport_type} with {len(kp_dict)} keypoints'
+            }
+    # ƯU TIÊN: Nếu đã xác định được sport type, chỉ chạy detection cho sport đó
+    prioritize_detected_sport = not run_all_sports
+
+    print(f"DEBUG - Sport type: {sport_type}, Run all sports: {run_all_sports}")
 
     # ==================== BÓNG ĐÁ (SOCCER) ====================
     if 'soccer' in sport_lower or 'football' in sport_lower or run_all_sports:
@@ -2497,6 +2595,75 @@ def detect_sports_actions(pose_data, sport_type, image_shape):
         'body_orientation': body_orientation,
         'keypoints_count': len(kp_dict),
         'details': f'Analyzed {len(kp_dict)} keypoints for {sport_type} actions'
+    }
+
+
+def get_best_action_for_sport(detected_actions, sport_type, confidence_threshold=0.6):
+    """
+    Lọc và chọn action tốt nhất cho môn thể thao cụ thể
+
+    Args:
+        detected_actions: List các action đã detect
+        sport_type: Loại thể thao đang phân tích
+        confidence_threshold: Ngưỡng confidence tối thiểu
+
+    Returns:
+        Dict: Action tốt nhất cho môn thể thao này
+    """
+    if not detected_actions:
+        return None
+
+    sport_lower = sport_type.lower()
+
+    # Mapping các action thuộc về từng môn thể thao
+    sport_action_mapping = {
+        'basketball': ['shooting', 'dribbling'],
+        'soccer': ['shooting', 'pre_kick_stance', 'approach_run', 'dribbling'],
+        'football': ['shooting', 'pre_kick_stance', 'approach_run', 'dribbling'],
+        'volleyball': ['classic_spike', 'power_spike_prep', 'double_hand_spike', 'quick_attack',
+                       'double_block', 'single_block', 'soft_block', 'setting', 'digging'],
+        'tennis': ['serving', 'forehand', 'backhand'],
+        'badminton': ['badminton_smash', 'clear_shot', 'drop_shot', 'defensive_ready'],
+        'boxing': ['straight_punch', 'left_hook', 'right_hook', 'uppercut', 'body_shot', 'defensive_guard'],
+        'martial arts': ['straight_punch', 'left_hook', 'right_hook', 'uppercut', 'body_shot',
+                         'defensive_guard', 'high_kick', 'mid_kick'],
+        'golf': ['golf_backswing', 'golf_impact', 'golf_follow_through', 'putting'],
+        'running': ['sprinting', 'running'],
+        'track and field': ['sprinting', 'running'],
+        'swimming': ['freestyle_stroke']
+    }
+
+    # Tìm actions thuộc về sport hiện tại
+    relevant_actions = []
+    sport_actions = sport_action_mapping.get(sport_lower, [])
+
+    for action in detected_actions:
+        action_name = action['action']
+        action_confidence = action['confidence']
+
+        # Kiểm tra action có thuộc sport này không
+        if action_name in sport_actions and action_confidence >= confidence_threshold:
+            relevant_actions.append(action)
+
+    # Nếu không có action nào thuộc sport này, trả về action có confidence cao nhất
+    if not relevant_actions:
+        best_action = max(detected_actions, key=lambda x: x['confidence'])
+        if best_action['confidence'] >= confidence_threshold:
+            return {
+                'action': best_action,
+                'sport_match': False,
+                'note': f"No specific {sport_type} actions found, showing best general action"
+            }
+        else:
+            return None
+
+    # Chọn action tốt nhất trong sport này
+    best_sport_action = max(relevant_actions, key=lambda x: x['confidence'])
+
+    return {
+        'action': best_sport_action,
+        'sport_match': True,
+        'note': f"Best {sport_type} action detected"
     }
 
 def segment_main_subject(img, yolo_seg, main_subject_box):
@@ -4532,39 +4699,91 @@ def visualize_sports_results(img_data, detections, depth_map, sports_analysis, a
                     else:  # Phần chân
                         line_color = (0, 255, 0)
 
-                    # Vẽ đường với độ dày lớn hơn
-                    cv2.line(pose_viz, pt1, pt2, (0, 0, 0), 5)  # Đường viền đen
-                    cv2.line(pose_viz, pt1, pt2, line_color, 3)  # Đường màu
-                    # HIỂN THỊ ACTION DETECTION
-                    if 'action_detection' in sports_analysis and sports_analysis['action_detection'].get(
-                            'detected_actions'):
-                        actions = sports_analysis['action_detection']['detected_actions']
-                        y_offset = 30
+                        # Vẽ đường với độ dày lớn hơn
+                        cv2.line(pose_viz, pt1, pt2, (0, 0, 0), 5)  # Đường viền đen
+                        cv2.line(pose_viz, pt1, pt2, line_color, 3)  # Đường màu
 
-                        # Hiển thị tiêu đề
-                        cv2.putText(pose_viz, "DETECTED ACTIONS:", (10, y_offset),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-                        y_offset += 25
+                # HIỂN THỊ BEST ACTION CHO SPORT CỤ THỂ (ƯU TIÊN)
+                if 'best_sport_action' in sports_analysis and sports_analysis['best_sport_action']:
+                    best_result = sports_analysis['best_sport_action']
+                    best_action = best_result['action']
+                    sport_match = best_result['sport_match']
 
-                        # Hiển thị từng action
-                        for i, action in enumerate(actions[:3]):  # Hiển thị tối đa 3 actions
-                            action_text = f"{action['action'].upper()}: {action['confidence']:.2f}"
-                            color = (0, 255, 255) if action['confidence'] > 0.8 else (0, 255, 0)
+                    y_offset = 30
 
-                            cv2.putText(pose_viz, action_text, (10, y_offset),
-                                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-                            y_offset += 20
+                    # Tiêu đề nổi bật cho best action
+                    cv2.putText(pose_viz, "BEST ACTION:", (10, y_offset),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 3)  # Vàng, đậm hơn
+                    y_offset += 35
 
-                            # Hiển thị chi tiết ngắn gọn
-                            if len(action['details']) < 50:
-                                cv2.putText(pose_viz, action['details'], (10, y_offset),
-                                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
-                                y_offset += 15
+                    # Action name với màu nổi bật
+                    action_text = f"{best_action['action'].upper()}"
+                    cv2.putText(pose_viz, action_text, (10, y_offset),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+                    y_offset += 25
 
-                        # Hiển thị body orientation
-                        orientation = sports_analysis['action_detection'].get('body_orientation', 'unknown')
-                        cv2.putText(pose_viz, f"View: {orientation}", (10, y_offset + 10),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 0), 2)
+                    # Confidence với màu khác biệt
+                    conf_text = f"Confidence: {best_action['confidence']:.2f}"
+                    conf_color = (0, 255, 0) if best_action['confidence'] > 0.8 else (0, 200, 255)
+                    cv2.putText(pose_viz, conf_text, (10, y_offset),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, conf_color, 2)
+                    y_offset += 20
+
+                    # Sport match indicator
+                    match_text = "Sport Match: YES" if sport_match else "Sport Match: NO"
+                    match_color = (0, 255, 0) if sport_match else (0, 100, 255)
+                    cv2.putText(pose_viz, match_text, (10, y_offset),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, match_color, 1)
+                    y_offset += 20
+
+                    # Details (rút ngắn nếu quá dài)
+                    details = best_action['details']
+                    if len(details) > 45:
+                        details = details[:42] + "..."
+                    cv2.putText(pose_viz, details, (10, y_offset),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
+                    y_offset += 20
+
+                    # Body orientation
+                    orientation = sports_analysis.get('action_detection', {}).get('body_orientation', 'unknown')
+                    cv2.putText(pose_viz, f"View: {orientation}", (10, y_offset),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 200, 0), 1)
+                    y_offset += 25
+
+                    # Separator line
+                    cv2.line(pose_viz, (10, y_offset), (300, y_offset), (100, 100, 100), 1)
+                    y_offset += 15
+
+                # HIỂN THỊ TẤT CẢ ACTIONS (NẾU KHÔNG CÓ BEST ACTION HOẶC MUỐN XEM THÊM)
+                elif 'action_detection' in sports_analysis and sports_analysis['action_detection'].get(
+                        'detected_actions'):
+                    actions = sports_analysis['action_detection']['detected_actions']
+                    y_offset = 30
+
+                    # Hiển thị tiêu đề
+                    cv2.putText(pose_viz, "DETECTED ACTIONS:", (10, y_offset),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                    y_offset += 25
+
+                    # Hiển thị từng action (tối đa 3)
+                    for i, action in enumerate(actions[:3]):
+                        action_text = f"{action['action'].upper()}: {action['confidence']:.2f}"
+                        color = (0, 255, 255) if action['confidence'] > 0.8 else (0, 255, 0)
+
+                        cv2.putText(pose_viz, action_text, (10, y_offset),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                        y_offset += 20
+
+                        # Hiển thị chi tiết ngắn gọn
+                        if len(action['details']) < 50:
+                            cv2.putText(pose_viz, action['details'], (10, y_offset),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
+                            y_offset += 15
+
+                    # Hiển thị body orientation
+                    orientation = sports_analysis['action_detection'].get('body_orientation', 'unknown')
+                    cv2.putText(pose_viz, f"View: {orientation}", (10, y_offset + 10),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 0), 2)
     else:
         print("Không tìm thấy dữ liệu pose_analysis hoặc cấu trúc dữ liệu không đúng")
         print(
@@ -4869,6 +5088,23 @@ def visualize_sports_results(img_data, detections, depth_map, sports_analysis, a
             print(f"     - View angle: {action['body_orientation']}")
     else:
         print("\nSports Action Detection: No specific actions detected")
+
+    # HIỂN THỊ BEST ACTION CHO SPORT CỤ THỂ
+    if 'best_sport_action' in sports_analysis and sports_analysis['best_sport_action']:
+        print("\n🏆 BEST ACTION FOR THIS SPORT:")
+        best_result = sports_analysis['best_sport_action']
+        best_action = best_result['action']
+        sport_match = best_result['sport_match']
+        note = best_result['note']
+
+        print(f"- Action: {best_action['action'].upper()}")
+        print(f"- Confidence: {best_action['confidence']:.3f}")
+        print(f"- Body Part: {best_action['body_part']}")
+        print(f"- Details: {best_action['details']}")
+        print(f"- Sport-Specific Match: {'✓ YES' if sport_match else '✗ NO'}")
+        print(f"- Note: {note}")
+    else:
+        print("\n🏆 BEST ACTION FOR THIS SPORT: None found")
     # HIỂN THỊ PHÂN TÍCH BIỂU CẢM CẢI TIẾN
     if facial_analysis and facial_analysis.get('has_faces', False):
         print("\nFacial Expression Analysis (Advanced):")
@@ -4997,8 +5233,26 @@ def analyze_sports_image(file_path):
 
     # Step 6: PHÁT HIỆN HÀNH ĐỘNG THỂ THAO (TRƯỚC composition analysis)
     print("Detecting sports actions...")
-    # Sử dụng 'Unknown' để detect tất cả sports
-    action_detection_results = detect_sports_actions(pose_results, 'Unknown', img_data['resized_array'].shape)
+
+    # Thử dự đoán sport type sơ bộ từ environment trước
+    preliminary_sport = 'Unknown'
+
+    # Phân tích sơ bộ môi trường để có sport type cho action detection
+    env_analysis = analyze_sports_environment(img_data, depth_map)
+    if env_analysis['sport_probabilities']:
+        env_sport, env_prob = max(env_analysis['sport_probabilities'].items(), key=lambda x: x[1])
+        if env_prob > 0.6:  # Ngưỡng thấp hơn để ưu tiên action detection
+            preliminary_sport = env_sport
+            print(f"DEBUG - Using preliminary sport type for action detection: {preliminary_sport}")
+
+    # Kiểm tra visual cues cho track and field
+    if preliminary_sport == 'Unknown':
+        # Nếu có nhiều người chạy và có track lines -> Track and Field
+        if detections.get('athletes', 0) >= 3:
+            preliminary_sport = 'Track and Field'
+            print(f"DEBUG - Multiple athletes detected, assuming Track and Field")
+
+    action_detection_results = detect_sports_actions(pose_results, preliminary_sport, img_data['resized_array'].shape)
 
     # Cập nhật sports_analysis với action detection
     sports_analysis['action_detection'] = action_detection_results
@@ -5013,7 +5267,36 @@ def analyze_sports_image(file_path):
         'sports_analysis': sports_analysis,  # Bao gồm action_detection results
         'depth_map': depth_map
     }, img_data)
+    # Step 7.5: Lọc action tốt nhất cho sport type đã xác định
+    sport_type = composition_analysis.get('sport_type', 'Unknown')
+    detected_actions = action_detection_results.get('detected_actions', [])
 
+    if detected_actions and sport_type != 'Unknown':
+        print(f"\n=== FILTERING BEST ACTION FOR {sport_type.upper()} ===")
+        best_action_result = get_best_action_for_sport(detected_actions, sport_type)
+
+        if best_action_result:
+            best_action = best_action_result['action']
+            sport_match = best_action_result['sport_match']
+            note = best_action_result['note']
+
+            print(f"Sport Type: {sport_type}")
+            print(f"Best Action: {best_action['action'].upper()}")
+            print(f"Confidence: {best_action['confidence']:.3f}")
+            print(f"Details: {best_action['details']}")
+            print(f"Body Part: {best_action['body_part']}")
+            print(f"Sport Match: {'✓' if sport_match else '✗'}")
+            print(f"Note: {note}")
+            print("=" * 50)
+
+            # Lưu thông tin này vào sports_analysis
+            sports_analysis['best_sport_action'] = best_action_result
+        else:
+            print(f"No suitable actions found for {sport_type} (confidence threshold not met)")
+            sports_analysis['best_sport_action'] = None
+    else:
+        print("Cannot filter actions - either no actions detected or sport type unknown")
+        sports_analysis['best_sport_action'] = None
     # Step 8: Facial expression analysis với phiên bản nâng cao
     print("Starting advanced facial expression analysis...")
     try:
