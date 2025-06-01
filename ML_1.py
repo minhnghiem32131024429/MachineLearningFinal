@@ -2887,13 +2887,25 @@ def analyze_sports_composition(detections, analysis, img_data):
                             detected_sport_from_action = 'Basketball'
                         else:
                             detected_sport_from_action = 'Soccer'  # Default
-    # Quyết định cuối cùng về môn thể thao (ƯU TIÊN ACTION DETECTION)
+    # Quyết định cuối cùng về môn thể thao (ƯU TIÊN EQUIPMENT DETECTION)
     decision_log = []
 
-    if detected_sport_from_action and action_confidence > 0.6:
+    # ƯU TIÊN 1: Equipment detection với confidence cao
+    if detected_sport and equipment_confidence >= 0.7:
+        result['sport_type'] = detected_sport
+        decision_log.append(f"Equipment detection (HIGH): {detected_sport} ({equipment_confidence:.2f})")
+    # ƯU TIÊN 2: Action detection với confidence rất cao
+    elif detected_sport_from_action and action_confidence > 0.8:
+        result['sport_type'] = detected_sport_from_action
+        decision_log.append(f"Action detection (VERY HIGH): {detected_sport_from_action} ({action_confidence:.2f})")
+    # ƯU TIÊN 3: Equipment detection với confidence trung bình nhưng vẫn cao hơn action/env
+    elif detected_sport and equipment_confidence > max(action_confidence, env_confidence):
+        result['sport_type'] = detected_sport
+        decision_log.append(f"Equipment detection: {detected_sport} ({equipment_confidence:.2f})")
+    # ƯU TIÊN 4: Action detection với confidence cao
+    elif detected_sport_from_action and action_confidence > 0.6:
         result['sport_type'] = detected_sport_from_action
         decision_log.append(f"Action detection: {detected_sport_from_action} ({action_confidence:.2f})")
-    elif detected_sport and equipment_confidence > env_confidence:
         result['sport_type'] = detected_sport
         decision_log.append(f"Equipment detection: {detected_sport} ({equipment_confidence:.2f})")
     elif detected_sport_from_env and env_confidence > 0.8:
@@ -3146,7 +3158,8 @@ def analyze_sports_composition(detections, analysis, img_data):
 
         # 6. ĐIỀU CHỈNH THEO LOẠI THỂ THAO VÀ NHÓM
         sport_bonus = 1.0
-        sport_type = result.get('sport_type', 'Unknown').lower()
+        sport_type_raw = result.get('sport_type', 'Unknown')
+        sport_type = sport_type_raw.lower() if sport_type_raw is not None else 'unknown'
 
         if main_subject.get('is_group', False):
             # NHÓM: Ưu tiên kích thước và breathing room hơn vị trí
@@ -5082,7 +5095,8 @@ def visualize_sports_results(img_data, detections, depth_map, sports_analysis, a
         print(f"- Keypoints analyzed: {action_data.get('keypoints_count', 0)}")
 
         for i, action in enumerate(action_data['detected_actions']):
-            print(f"  {i + 1}. {action['action'].upper()} ({action['confidence']:.2f})")
+            action_name = action['action'].upper() if action['action'] is not None else 'UNKNOWN'
+            print(f"  {i + 1}. {action_name} ({action['confidence']:.2f})")
             print(f"     - Body part: {action['body_part']}")
             print(f"     - Details: {action['details']}")
             print(f"     - View angle: {action['body_orientation']}")
@@ -5097,7 +5111,8 @@ def visualize_sports_results(img_data, detections, depth_map, sports_analysis, a
         sport_match = best_result['sport_match']
         note = best_result['note']
 
-        print(f"- Action: {best_action['action'].upper()}")
+        action_name = best_action['action'].upper() if best_action['action'] is not None else 'UNKNOWN'
+        print(f"- Action: {action_name}")
         print(f"- Confidence: {best_action['confidence']:.3f}")
         print(f"- Body Part: {best_action['body_part']}")
         print(f"- Details: {best_action['details']}")
@@ -5425,13 +5440,14 @@ def generate_sports_caption(analysis_result):
 
         # Check equipment
         for eq in equipment:
-            eq_lower = eq.lower()
-            if sport_name in eq_lower or any(term.lower() in eq_lower for term in terms):
-                detected_sport = sport_name
-                break
+            if eq is not None:  # ← THÊM DÒNG NÀY
+                eq_lower = eq.lower()
+                if sport_name in eq_lower or any(term.lower() in eq_lower for term in terms):
+                    detected_sport = sport_name
+                    break
 
     # If no specific sport found but "sports ball" is detected
-    if detected_sport == 'unknown' and any('ball' in eq.lower() for eq in equipment):
+    if detected_sport == 'unknown' and any('ball' in eq.lower() for eq in equipment if eq is not None):
         detected_sport = 'ball sport'
 
     # ----------------- 2. ANALYZE SCENE COMPLEXITY -----------------
@@ -5677,6 +5693,47 @@ def generate_sports_caption(analysis_result):
             detail_phrases.append(f"with {eq_list[0]} and {eq_list[1]}")
         elif len(eq_list) > 2:
             detail_phrases.append(f"with {', '.join(eq_list[:-1])}, and {eq_list[-1]}")
+
+    # THÊM ĐOẠN NÀY: ----------------- 6.1. DESCRIBE BEST ACTION -----------------
+    # Kiểm tra best action từ sports analysis
+    if 'sports_analysis' in analysis_result and 'best_sport_action' in analysis_result['sports_analysis']:
+        best_action_result = analysis_result['sports_analysis']['best_sport_action']
+        if best_action_result and best_action_result.get('action'):
+            best_action = best_action_result['action']
+            action_name = best_action['action']
+            action_confidence = best_action['confidence']
+
+            # Chỉ thêm vào caption nếu confidence đủ cao
+            if action_confidence > 0.6:
+                # Mapping action names to natural descriptions
+                action_descriptions = {
+                    'shooting': 'taking a shot',
+                    'dribbling': 'dribbling',
+                    'pre_kick_stance': 'preparing to kick',
+                    'approach_run': 'running up to the ball',
+                    'serving': 'serving',
+                    'forehand': 'executing a forehand',
+                    'backhand': 'performing a backhand',
+                    'sprinting': 'sprinting',
+                    'running': 'running',
+                    'classic_spike': 'spiking the ball',
+                    'power_spike_prep': 'preparing to spike',
+                    'setting': 'setting the ball',
+                    'digging': 'digging the ball',
+                    'blocking': 'blocking at the net',
+                    'straight_punch': 'throwing a punch',
+                    'defensive_guard': 'in defensive stance',
+                    'high_kick': 'executing a high kick',
+                    'golf_backswing': 'in backswing motion',
+                    'golf_impact': 'striking the ball',
+                    'putting': 'putting',
+                    'badminton_smash': 'smashing the shuttlecock',
+                    'freestyle_stroke': 'swimming freestyle'
+                }
+
+                # Lấy mô tả tự nhiên của action
+                action_desc = action_descriptions.get(action_name, action_name.replace('_', ' '))
+                action_phrases.append(action_desc)
     # ----------------- 6.5. DESCRIBE DETECTED ACTIONS -----------------
     detected_actions = []
     if 'action_detection' in sports_analysis and sports_analysis['action_detection'].get('detected_actions'):
