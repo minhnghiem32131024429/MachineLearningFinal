@@ -1030,16 +1030,15 @@ def verify_face(face_img):
 
 
 def analyze_sports_environment(img_data, depth_map=None):
-    """
-    Phân tích môi trường/bối cảnh thể thao dựa trên đặc điểm màu sắc, kết cấu và cấu trúc
-
-    Args:
-        img_data: Dict chứa ảnh gốc và ảnh đã resize
-        depth_map: Bản đồ độ sâu (nếu có)
-
-    Returns:
-        Dict: Thông tin về môi trường thể thao và xác suất từng môn
-    """
+    # Kiểm tra xem có action boxing nào không
+    if 'detected_actions' in img_data:
+        for action in img_data['detected_actions']:
+            boxing_actions = ['straight_punch', 'left_hook', 'right_hook', 'uppercut', 'body_shot', 'defensive_guard']
+            if action['action'] in boxing_actions and action.get('confidence', 0) > 0.5:
+                print(f"💥 FORCE BOXING từ analyze_sports_environment: {action['action']}")
+                return {'sport_type': 'Boxing', 'confidence': 0.99,
+                        'sport_type_source': f'boxing_action_{action["action"]}',
+                        'environment_indicators': {'boxing_ring': 0.8}}
     # Lấy ảnh đã resize để phân tích
     image = img_data['resized_array']
     height, width = image.shape[:2]
@@ -2189,20 +2188,18 @@ def detect_sports_actions(pose_data, sport_type, image_shape, detected_equipment
                 'body_part': 'both_arms'
             })
 
-            # CẬP NHẬT THÔNG TIN VỀ LOẠI THỂ THAO NẾU PHÁT HIỆN BOXING - LOGIC MỚI
-            if detected_actions:  # Kiểm tra có actions nào không
-                detected_action = detected_actions[-1]['action']
-                boxing_actions = ['straight_punch', 'left_hook', 'right_hook', 'uppercut', 'body_shot',
-                                  'defensive_guard', 'boxing_stance', 'aggressive_stance']
+        # CẬP NHẬT THÔNG TIN VỀ LOẠI THỂ THAO NẾU PHÁT HIỆN BOXING - LOGIC MỚI
+        if action_confidence > 0.5:  # Giảm ngưỡng từ 0.7 xuống 0.5
+            detected_action = detected_actions[-1]['action'] if detected_actions else None
+            boxing_actions = ['straight_punch', 'left_hook', 'right_hook', 'uppercut', 'body_shot',
+                              'defensive_guard', 'boxing_stance', 'aggressive_stance']
 
-                if detected_action in boxing_actions:
-                    # Đánh dấu boxing với ngưỡng thấp hơn (0.5)
-                    if detected_actions[-1]['confidence'] > 0.5:
-                        detected_actions[-1]['detected_sport'] = 'boxing'
-                        # Đặt cờ đặc biệt để FORCE sport type
-                        detected_actions[-1]['force_sport_type'] = True
-                        print(f"DEBUG-FIX: Đã đánh dấu {detected_action} là boxing với confidence="
-                              f"{detected_actions[-1]['confidence']:.2f} - FORCE BOXING TYPE")
+            if detected_action in boxing_actions:
+                detected_actions[-1]['detected_sport'] = 'boxing'
+                # Thêm một flag đặc biệt để force sport type
+                detected_actions[-1]['force_boxing'] = True
+                print(
+                    f"DEBUG - Boxing action detected: {detected_action} - confidence: {detected_actions[-1]['confidence']:.2f} - FORCE BOXING TYPE")
 
 
     # ==================== CHẠY/ĐIỀN KINH (RUNNING/TRACK) ====================
@@ -2900,22 +2897,26 @@ def analyze_sports_composition(detections, analysis, img_data):
     if 'sports_analysis' in analysis and 'action_detection' in analysis['sports_analysis'] and \
             analysis['sports_analysis']['action_detection'].get('detected_actions'):
 
-        # THÊM: Danh sách đầy đủ các hành động boxing
+        # Danh sách cụ thể các hành động boxing
         boxing_actions = ['straight_punch', 'left_hook', 'right_hook', 'uppercut', 'body_shot',
                           'defensive_guard', 'boxing_stance', 'aggressive_stance']
 
+        # Trước tiên, kiểm tra trực tiếp tên hành động
         for action in analysis['sports_analysis']['action_detection']['detected_actions']:
-            # THÊM: Kiểm tra trực tiếp tên hành động boxing
             if action['action'] in boxing_actions and action.get('confidence', 0) > 0.6:
                 result['sport_type'] = 'Boxing'
                 decision_log.append(f"Boxing action detected: {action['action']} ({action['confidence']:.2f})")
-                print(f"DEBUG-FIX: Phát hiện hành động {action['action']} -> Đặt sport type thành Boxing")
+                print(f"DEBUG-FIX: Phát hiện boxing action {action['action']}, gán sport_type=Boxing")
                 break
-            # Vẫn giữ kiểm tra detected_sport như cũ
-            elif action.get('confidence', 0) > 0.7 and action.get('detected_sport') == 'boxing':
-                result['sport_type'] = 'Boxing'
-                decision_log.append(f"Boxing action detection: {action['action']} ({action['confidence']:.2f})")
-                break
+
+        # Nếu chưa tìm thấy, kiểm tra thông qua trường detected_sport (logic cũ)
+        if result['sport_type'] != 'Boxing':
+            for action in analysis['sports_analysis']['action_detection']['detected_actions']:
+                if action.get('confidence', 0) > 0.7 and action.get('detected_sport') == 'boxing':
+                    result['sport_type'] = 'Boxing'
+                    decision_log.append(
+                        f"High-confidence boxing action detection: {action['action']} ({action['confidence']:.2f})")
+                    break
 
     # PRIORITY 1: Action detection có confidence cao (ưu tiên nhất)
     if detected_sport_from_action and action_confidence > 0.7:
@@ -2968,8 +2969,23 @@ def analyze_sports_composition(detections, analysis, img_data):
                         f"FINAL CHECK: Found boxing action {action['action']} - overriding to Boxing")
                     break
 
-    # Chỉ sử dụng default Running nếu vẫn chưa xác định được
-    if result['sport_type'] == 'Unknown':
+    # Kiểm tra lần cuối xem có action boxing nào không
+    boxing_actions = ['straight_punch', 'left_hook', 'right_hook', 'uppercut', 'body_shot',
+                      'defensive_guard', 'boxing_stance', 'aggressive_stance']
+
+    boxing_detected = False
+    if 'sports_analysis' in analysis and 'action_detection' in analysis['sports_analysis']:
+        actions = analysis['sports_analysis']['action_detection'].get('detected_actions', [])
+        for action in actions:
+            if action['action'] in boxing_actions and action.get('confidence', 0) > 0.5:
+                result['sport_type'] = 'Boxing'
+                decision_log.append(f"Final check: Boxing action found: {action['action']}")
+                print(f"DEBUG-FIX: Kiểm tra cuối cùng - phát hiện {action['action']} -> set Boxing")
+                boxing_detected = True
+                break
+
+    # Chỉ sử dụng Running làm mặc định khi không phát hiện boxing
+    if not boxing_detected and result['sport_type'] == 'Unknown':
         result['sport_type'] = 'Running'  # Default cuối cùng
         decision_log.append("Default: Running")
 
