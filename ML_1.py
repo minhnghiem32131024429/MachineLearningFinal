@@ -2778,20 +2778,21 @@ def analyze_sports_composition(detections, analysis, img_data):
     env_confidence = 0.0
 
     # Lấy môn thể thao có xác suất cao nhất từ phân tích môi trường
-    if env_analysis['sport_probabilities']:
+    if env_analysis.get('sport_probabilities') and isinstance(env_analysis['sport_probabilities'], dict):
         env_sport, env_prob = max(env_analysis['sport_probabilities'].items(), key=lambda x: x[1])
-        if env_prob > 0.8:  # Tăng ngưỡng tin cậy từ 0.5 lên 0.8 để giảm lỗi phân loại
+        # Đảm bảo env_sport không phải None
+        if env_sport is not None and env_prob > 0.8:
             detected_sport_from_env = env_sport
             env_confidence = env_prob
             print(f"Phát hiện môn thể thao từ môi trường: {env_sport} (độ tin cậy: {env_prob:.2f})")
         else:
             print(f"Độ tin cậy phân tích môi trường quá thấp ({env_prob:.2f} < 0.8), bỏ qua kết quả: {env_sport}")
-
     detected_sport = None
     equipment_confidence = 0.0
 
-    for cls in detections['classes']:
-        if cls in sport_equipment:
+    detected_classes = detections.get('classes', [])
+    for cls in detected_classes:
+        if cls is not None and cls in sport_equipment:
             detected_sport = sport_equipment[cls]
             equipment_confidence = 0.7  # Độ tin cậy khi phát hiện từ dụng cụ
             break
@@ -2804,7 +2805,7 @@ def analyze_sports_composition(detections, analysis, img_data):
         action_data = analysis['sports_analysis']['action_detection']
         detected_actions = action_data.get('detected_actions', [])
 
-        if detected_actions:
+        if detected_actions and isinstance(detected_actions, list):
             # Mapping từ action sang sport type
             action_to_sport = {
                 # Boxing/Martial Arts actions
@@ -3159,7 +3160,10 @@ def analyze_sports_composition(detections, analysis, img_data):
         # 6. ĐIỀU CHỈNH THEO LOẠI THỂ THAO VÀ NHÓM
         sport_bonus = 1.0
         sport_type_raw = result.get('sport_type', 'Unknown')
-        sport_type = sport_type_raw.lower() if sport_type_raw is not None else 'unknown'
+        # Đảm bảo sport_type_raw không phải None
+        if sport_type_raw is None or sport_type_raw == '':
+            sport_type_raw = 'Unknown'
+        sport_type = sport_type_raw.lower()
 
         if main_subject.get('is_group', False):
             # NHÓM: Ưu tiên kích thước và breathing room hơn vị trí
@@ -5440,14 +5444,15 @@ def generate_sports_caption(analysis_result):
 
         # Check equipment
         for eq in equipment:
-            if eq is not None:  # ← THÊM DÒNG NÀY
+            if eq is not None and isinstance(eq, str):  # Kiểm tra cả None và kiểu string
                 eq_lower = eq.lower()
                 if sport_name in eq_lower or any(term.lower() in eq_lower for term in terms):
                     detected_sport = sport_name
                     break
 
     # If no specific sport found but "sports ball" is detected
-    if detected_sport == 'unknown' and any('ball' in eq.lower() for eq in equipment if eq is not None):
+    if detected_sport == 'unknown' and any(
+            'ball' in eq.lower() for eq in equipment if eq is not None and isinstance(eq, str)):
         detected_sport = 'ball sport'
 
     # ----------------- 2. ANALYZE SCENE COMPLEXITY -----------------
@@ -5671,7 +5676,7 @@ def generate_sports_caption(analysis_result):
     if equipment:
         eq_list = []
         for eq in equipment:
-            if eq.lower() == "sports ball":
+            if eq is not None and isinstance(eq, str) and eq.lower() == "sports ball":
                 if detected_sport == "soccer":
                     eq_list.append("a soccer ball")
                 elif detected_sport == "basketball":
