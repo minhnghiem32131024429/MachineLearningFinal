@@ -5646,7 +5646,7 @@ def generate_sports_caption(analysis_result):
     # ----------------- 5. DESCRIBE ACTION -----------------
     # ƯU TIÊN: Nếu đã có action phrase từ best_sport_action, bỏ qua generic action
     if action_phrases:
-        print(f"DEBUG - Skipping generic action description, using specific action: {action_phrases[0]}")
+        print(f"DEBUG - Using existing specific action: {action_phrases[0]}")
     elif action_quality:
         if action_quality == 'High':
             if detected_sport in ['soccer', 'football', 'basketball', 'volleyball']:
@@ -5816,6 +5816,7 @@ def generate_sports_caption(analysis_result):
                 action_phrases.append(action_desc)
                 best_action_found = True
                 print(f"DEBUG - Added best action to caption: {action_desc}")
+                print(f"DEBUG - action_phrases now contains: {action_phrases}")
     # ----------------- 6.5. DESCRIBE DETECTED ACTIONS (CHỈ KHI CHƯA CÓ BEST ACTION) -----------------
     detected_actions = []
     if not best_action_found and 'action_detection' in sports_analysis and sports_analysis['action_detection'].get('detected_actions'):
@@ -6025,7 +6026,10 @@ def generate_sports_caption(analysis_result):
 
     # Add action
     if action_phrases:
+        print(f"DEBUG - Adding action phrase to caption: {action_phrases[0]}")
         all_parts.append(action_phrases[0])
+    else:
+        print("DEBUG - No action phrases found to add to caption")
 
     # Add details
     if detail_phrases:
@@ -6034,6 +6038,9 @@ def generate_sports_caption(analysis_result):
     # Add emotion
     if emotion_phrases:
         all_parts.append(emotion_phrases[0])
+
+    # DEBUG: Print all parts before combining
+    print(f"DEBUG - All caption parts: {all_parts}")
 
     # Combine main parts
     main_caption = ' '.join(all_parts)
