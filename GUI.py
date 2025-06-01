@@ -737,7 +737,7 @@ class SportsAnalysisApp(QMainWindow):
         header_layout = QHBoxLayout()
 
         # Logo và tiêu đề
-        title_label = QLabel("Sports Image Analysis Pro")
+        title_label = QLabel("Sports Image Analyser and Caption Generator")
         title_label.setStyleSheet("""
             font-size: 24px; 
             font-weight: bold; 

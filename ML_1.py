@@ -6026,8 +6026,8 @@ def generate_sports_caption(analysis_result):
 
     # Add action
     if action_phrases:
-        print(f"DEBUG - Adding action phrase to caption: {action_phrases[0]}")
-        all_parts.append(action_phrases[0])
+        print(f"DEBUG - Adding action phrase to caption: {action_phrases[1]}")
+        all_parts.append(action_phrases[1])
     else:
         print("DEBUG - No action phrases found to add to caption")
 
