@@ -4743,56 +4743,58 @@ def visualize_sports_results(img_data, detections, depth_map, sports_analysis, a
                         cv2.line(pose_viz, pt1, pt2, (0, 0, 0), 5)  # Đường viền đen
                         cv2.line(pose_viz, pt1, pt2, line_color, 3)  # Đường màu
 
-                # HIỂN THỊ BEST ACTION CHO SPORT CỤ THỂ (ƯU TIÊN)
+                # HIỂN THỊ BEST ACTION CHO SPORT CỤ THỂ (ƯU TIÊN) - CHỈ KHI SPORT MATCH = TRUE
                 if 'best_sport_action' in sports_analysis and sports_analysis['best_sport_action']:
                     best_result = sports_analysis['best_sport_action']
                     best_action = best_result['action']
                     sport_match = best_result['sport_match']
 
-                    y_offset = 30
+                    # CHỈ HIỂN THỊ KHI SPORT MATCH = TRUE
+                    if sport_match:
+                        y_offset = 30
 
-                    # Tiêu đề nổi bật cho best action
-                    cv2.putText(pose_viz, "BEST ACTION:", (10, y_offset),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 3)  # Vàng, đậm hơn
-                    y_offset += 35
+                        # Tiêu đề nổi bật cho best action
+                        cv2.putText(pose_viz, "BEST ACTION:", (10, y_offset),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 3)  # Vàng, đậm hơn
+                        y_offset += 35
 
-                    # Action name với màu nổi bật
-                    action_text = f"{best_action['action'].upper()}"
-                    cv2.putText(pose_viz, action_text, (10, y_offset),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-                    y_offset += 25
+                        # Action name với màu nổi bật
+                        action_text = f"{best_action['action'].upper()}"
+                        cv2.putText(pose_viz, action_text, (10, y_offset),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+                        y_offset += 25
 
-                    # Confidence với màu khác biệt
-                    conf_text = f"Confidence: {best_action['confidence']:.2f}"
-                    conf_color = (0, 255, 0) if best_action['confidence'] > 0.8 else (0, 200, 255)
-                    cv2.putText(pose_viz, conf_text, (10, y_offset),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, conf_color, 2)
-                    y_offset += 20
+                        # Confidence với màu khác biệt
+                        conf_text = f"Confidence: {best_action['confidence']:.2f}"
+                        conf_color = (0, 255, 0) if best_action['confidence'] > 0.8 else (0, 200, 255)
+                        cv2.putText(pose_viz, conf_text, (10, y_offset),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, conf_color, 2)
+                        y_offset += 20
 
-                    # Sport match indicator
-                    match_text = "Sport Match: YES" if sport_match else "Sport Match: NO"
-                    match_color = (0, 255, 0) if sport_match else (0, 100, 255)
-                    cv2.putText(pose_viz, match_text, (10, y_offset),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, match_color, 1)
-                    y_offset += 20
+                        # Sport match indicator - CHỈ HIỂN THỊ YES VÌ ĐÃ CHECK TRƯỚC ĐÓ
+                        match_text = "Sport Match: YES"
+                        match_color = (0, 255, 0)
+                        cv2.putText(pose_viz, match_text, (10, y_offset),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, match_color, 1)
+                        y_offset += 20
 
-                    # Details (rút ngắn nếu quá dài)
-                    details = best_action['details']
-                    if len(details) > 45:
-                        details = details[:42] + "..."
-                    cv2.putText(pose_viz, details, (10, y_offset),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
-                    y_offset += 20
+                        # Details (rút ngắn nếu quá dài)
+                        details = best_action['details']
+                        if len(details) > 45:
+                            details = details[:42] + "..."
+                        cv2.putText(pose_viz, details, (10, y_offset),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
+                        y_offset += 20
 
-                    # Body orientation
-                    orientation = sports_analysis.get('action_detection', {}).get('body_orientation', 'unknown')
-                    cv2.putText(pose_viz, f"View: {orientation}", (10, y_offset),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 200, 0), 1)
-                    y_offset += 25
+                        # Body orientation
+                        orientation = sports_analysis.get('action_detection', {}).get('body_orientation', 'unknown')
+                        cv2.putText(pose_viz, f"View: {orientation}", (10, y_offset),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 200, 0), 1)
+                        y_offset += 25
 
-                    # Separator line
-                    cv2.line(pose_viz, (10, y_offset), (300, y_offset), (100, 100, 100), 1)
-                    y_offset += 15
+                        # Separator line
+                        cv2.line(pose_viz, (10, y_offset), (300, y_offset), (100, 100, 100), 1)
+                        y_offset += 15
 
                 # HIỂN THỊ TẤT CẢ ACTIONS (NẾU KHÔNG CÓ BEST ACTION HOẶC MUỐN XEM THÊM)
                 elif 'action_detection' in sports_analysis and sports_analysis['action_detection'].get(
@@ -5642,7 +5644,10 @@ def generate_sports_caption(analysis_result):
         subject_phrases.append(random.choice(subject_options))
 
     # ----------------- 5. DESCRIBE ACTION -----------------
-    if action_quality:
+    # ƯU TIÊN: Nếu đã có action phrase từ best_sport_action, bỏ qua generic action
+    if action_phrases:
+        print(f"DEBUG - Skipping generic action description, using specific action: {action_phrases[0]}")
+    elif action_quality:
         if action_quality == 'High':
             if detected_sport in ['soccer', 'football', 'basketball', 'volleyball']:
                 action_options = [
@@ -5722,49 +5727,98 @@ def generate_sports_caption(analysis_result):
         elif len(eq_list) > 2:
             detail_phrases.append(f"with {', '.join(eq_list[:-1])}, and {eq_list[-1]}")
 
-    # THÊM ĐOẠN NÀY: ----------------- 6.1. DESCRIBE BEST ACTION -----------------
-    # Kiểm tra best action từ sports analysis
+    # ----------------- 6.1. DESCRIBE BEST ACTION (ƯU TIÊN CAO NHẤT) -----------------
+    best_action_found = False
+
+    # Kiểm tra best action từ sports analysis trước tiên
     if 'sports_analysis' in analysis_result and 'best_sport_action' in analysis_result['sports_analysis']:
         best_action_result = analysis_result['sports_analysis']['best_sport_action']
-        if best_action_result and best_action_result.get('action'):
+        if best_action_result and best_action_result.get('action') and best_action_result.get('sport_match'):
             best_action = best_action_result['action']
             action_name = best_action['action']
             action_confidence = best_action['confidence']
 
-            # Chỉ thêm vào caption nếu confidence đủ cao
-            if action_confidence > 0.6:
-                # Mapping action names to natural descriptions
+            # GIẢM ngưỡng confidence và ưu tiên sport_match = True
+            if action_confidence > 0.5:  # Giảm từ 0.6 xuống 0.5
+                # Mapping action names to natural, descriptive phrases
                 action_descriptions = {
-                    'shooting': 'taking a shot',
-                    'dribbling': 'dribbling',
-                    'pre_kick_stance': 'preparing to kick',
-                    'approach_run': 'running up to the ball',
-                    'serving': 'serving',
-                    'forehand': 'executing a forehand',
-                    'backhand': 'performing a backhand',
-                    'sprinting': 'sprinting',
-                    'running': 'running',
-                    'classic_spike': 'spiking the ball',
-                    'power_spike_prep': 'preparing to spike',
-                    'setting': 'setting the ball',
-                    'digging': 'digging the ball',
-                    'blocking': 'blocking at the net',
-                    'straight_punch': 'throwing a punch',
-                    'defensive_guard': 'in defensive stance',
-                    'high_kick': 'executing a high kick',
-                    'golf_backswing': 'in backswing motion',
-                    'golf_impact': 'striking the ball',
-                    'putting': 'putting',
-                    'badminton_smash': 'smashing the shuttlecock',
-                    'freestyle_stroke': 'swimming freestyle'
+                    # Soccer actions - chi tiết hơn
+                    'shooting': ['taking a powerful shot', 'in the moment of striking the ball',
+                                 'executing a shot on goal'],
+                    'dribbling': ['skillfully dribbling the ball', 'maneuvering with the ball',
+                                  'controlling the ball with precision'],
+                    'pre_kick_stance': ['positioning for a strategic kick', 'in pre-kick formation',
+                                        'preparing for a decisive strike', 'setting up for the perfect kick'],
+                    'approach_run': ['building momentum for the kick', 'in approach run toward the ball',
+                                     'gathering speed for the strike'],
+
+                    # Tennis actions
+                    'serving': ['executing a powerful serve', 'in serving motion', 'delivering a strategic serve'],
+                    'forehand': ['executing a dynamic forehand stroke', 'in full forehand swing'],
+                    'backhand': ['performing a precise backhand shot', 'completing a backhand stroke'],
+
+                    # Track & Field
+                    'sprinting': ['in explosive sprint motion', 'sprinting at maximum velocity',
+                                  'displaying lightning-fast acceleration'],
+                    'running': ['maintaining powerful running stride', 'in rhythmic running motion',
+                                'demonstrating endurance running form'],
+
+                    # Volleyball actions
+                    'classic_spike': ['executing a devastating spike', 'in powerful attack position',
+                                      'delivering a game-changing spike'],
+                    'power_spike_prep': ['winding up for a powerful attack', 'preparing for an explosive spike'],
+                    'double_hand_spike': ['executing a two-handed power spike', 'in double-handed attack stance'],
+                    'quick_attack': ['performing a lightning-quick attack', 'in rapid strike formation'],
+                    'setting': ['setting up teammates perfectly', 'orchestrating the team attack',
+                                'in precise setting motion'],
+                    'digging': ['making a crucial defensive dig', 'executing a saving defensive play'],
+                    'double_block': ['forming a solid defensive wall', 'executing a coordinated block'],
+                    'single_block': ['making a single-handed defensive block', 'in solo blocking stance'],
+
+                    # Boxing/Martial Arts
+                    'straight_punch': ['throwing a precise straight punch', 'executing a powerful jab',
+                                       'delivering a direct strike'],
+                    'left_hook': ['unleashing a devastating left hook', 'swinging a powerful hook punch'],
+                    'right_hook': ['executing a knockout right hook', 'delivering a circular power punch'],
+                    'uppercut': ['launching a rising uppercut', 'executing an upward power strike'],
+                    'defensive_guard': ['maintaining defensive readiness', 'in protective guard stance',
+                                        'showing defensive mastery'],
+                    'high_kick': ['executing a spectacular high kick', 'demonstrating flexible high-level technique'],
+                    'mid_kick': ['delivering a targeted body kick', 'executing a mid-level strike'],
+
+                    # Badminton
+                    'badminton_smash': ['smashing the shuttlecock with authority', 'executing a downward power smash'],
+                    'clear_shot': ['playing a strategic defensive clear', 'executing a high clear shot'],
+                    'drop_shot': ['performing a delicate drop shot', 'executing precise net play'],
+                    'defensive_ready': ['in defensive ready position', 'prepared for rapid counter-attack'],
+
+                    # Golf
+                    'golf_backswing': ['in perfect backswing position', 'winding up for the swing'],
+                    'golf_impact': ['at the crucial moment of ball impact', 'striking the ball with precision'],
+                    'golf_follow_through': ['completing a smooth follow-through', 'finishing the swing motion'],
+                    'putting': ['lining up the crucial putt', 'in delicate putting stance'],
+
+                    # Swimming
+                    'freestyle_stroke': ['executing perfect freestyle technique', 'in powerful swimming stroke'],
+
+                    # Default fallback
+                    'unknown': ['in athletic motion', 'displaying sporting technique']
                 }
 
-                # Lấy mô tả tự nhiên của action
-                action_desc = action_descriptions.get(action_name, action_name.replace('_', ' '))
+                # Chọn mô tả ngẫu nhiên từ danh sách
+                import random
+                descriptions = action_descriptions.get(action_name, [action_name.replace('_', ' ')])
+                if isinstance(descriptions, list):
+                    action_desc = random.choice(descriptions)
+                else:
+                    action_desc = descriptions
+
                 action_phrases.append(action_desc)
-    # ----------------- 6.5. DESCRIBE DETECTED ACTIONS -----------------
+                best_action_found = True
+                print(f"DEBUG - Added best action to caption: {action_desc}")
+    # ----------------- 6.5. DESCRIBE DETECTED ACTIONS (CHỈ KHI CHƯA CÓ BEST ACTION) -----------------
     detected_actions = []
-    if 'action_detection' in sports_analysis and sports_analysis['action_detection'].get('detected_actions'):
+    if not best_action_found and 'action_detection' in sports_analysis and sports_analysis['action_detection'].get('detected_actions'):
         actions = sports_analysis['action_detection']['detected_actions']
         high_confidence_actions = [a for a in actions if a['confidence'] > 0.7]
 
